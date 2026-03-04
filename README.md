@@ -27,6 +27,8 @@ contracts
 
 ## Tech Stack
 
+Backend
+
 - Language: Python (3.11+/3.12)
 - Environment & Packaging: Poetry
 - Web Framework: FastAPI
@@ -38,9 +40,17 @@ contracts
 - Database: Postgres + PostGIS for phenology metrics
 - Logging: Standard library logging with centralized setup
 
+
+Frontend
+## Frontend Development
+
+Prerequisites:
+- Node.js >= 28
+- npm >= 11
+
 ------------------------------------------------------------------------
 
-## Architecture
+## Backend Architecture
 
 ```
 src/fpts/
@@ -51,7 +61,7 @@ src/fpts/
 ├── config/ (Settings & configuration)
 ```
 
-### Layers
+### Backend Layers
 
 API Layer - Request validation - Response schemas - HTTP error mapping
 
@@ -150,10 +160,14 @@ Prerequisites
 - Poetry Installed.
 - (Optional) Git & GitHub for version control.
 - Docker
+- Node.js >= 20
+- npm >= 10
 
 ------------------------------------------------------------------------
 
 ## Run Locally
+
+### Backend
 
 This will allow a user to query the /phenoloyg/point, /phenoloyg/timeseries and /phenoloyg/area API endpoints.
 
@@ -177,6 +191,14 @@ docker compose down -v --remove-orphans
 ```bash
 docker exec -it fpts-postgis psql -U postgres -d fpts -c "\dt"
 ```
+
+### Frontend
+
+## Frontend Development
+
+cd frontend
+npm install
+npm run dev
 
 ------------------------------------------------------------------------
 
