@@ -269,4 +269,4 @@ Production Hardening:
 
 ## License
 
-MIT (or update as appropriate)
+MIT
