@@ -93,7 +93,8 @@ def get_point_phenology(
                         "mode=auto, or omit it to read stored metrics "
                         f"(default {DEFAULT_THRESHOLD_FRAC})"
                     ),
-                    "input": threshold_frac,
+                    # FastAPI reports query inputs as the raw string; match that.
+                    "input": str(threshold_frac),
                 }
             ]
         )

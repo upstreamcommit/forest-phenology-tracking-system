@@ -36,6 +36,12 @@ def test_keys_do_not_depend_on_the_numeric_type():
         product="p", year=2020, location=LOC, threshold_frac=np.float64(0.5)
     ) == compute_point_cache_key(product="p", year=2020, location=LOC, threshold_frac=0.5)
 
+    as_int = Location(lat=51, lon=0)
+    as_float = Location(lat=51.0, lon=0.0)
+    assert repo_point_cache_key(product="p", year=2020, location=as_int) == repo_point_cache_key(
+        product="p", year=2020, location=as_float
+    )
+
 
 def test_point_and_timeseries_keys_keep_exact_coordinates():
     near = Location(lat=51.4950001, lon=-0.495)

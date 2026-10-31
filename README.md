@@ -91,7 +91,7 @@ Parameters:
 Behaviour:
 -   200 → Data found
 -   404 → No data for that location/year
--   422 → Location outside the raster stack (`mode=compute`, or `mode=auto` without a stored row), a non-default `threshold_frac` with `mode=repo`, or invalid parameters
+-   422 → Location outside the raster stack when computing (`mode=compute`, or `mode=auto` with no stored row or a non-default `threshold_frac`), a non-default `threshold_frac` with `mode=repo`, or invalid parameters
 
 The two modes read different synthetic datasets:
 - **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`.

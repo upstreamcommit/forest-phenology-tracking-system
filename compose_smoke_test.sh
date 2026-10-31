@@ -3,7 +3,7 @@
 #
 # Usage: docker compose up -d --build, then
 #   ./compose_smoke_test.sh
-# It waits up to 2 minutes for $BASE_URL/health before running the checks.
+# It first polls $BASE_URL/health (60 attempts, 2s apart, 5s timeout each).
 set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
@@ -11,7 +11,7 @@ BASE_URL="${BASE_URL%/}"
 failures=0
 
 for i in $(seq 1 60); do
-  curl -fsS -o /dev/null --max-time 5 "$BASE_URL/health" && break
+  curl -fs -o /dev/null --max-time 5 "$BASE_URL/health" 2>/dev/null && break
   if [ "$i" = 60 ]; then
     echo "API not ready at $BASE_URL/health"
     exit 1

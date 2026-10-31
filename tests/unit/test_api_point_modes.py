@@ -89,6 +89,19 @@ def test_compute_caches_each_threshold_separately(app_memory):
     assert default_again.json()["season_length"] == COMPUTED_SEASON_LENGTH
 
 
+def test_points_uses_the_requested_threshold(app_memory):
+    client = TestClient(app_memory)
+    body = {"locations": [{"lat": POINT["lat"], "lon": POINT["lon"]}]}
+
+    default = client.post("/phenology/points", params={"year": 2020}, json=body)
+    custom = client.post(
+        "/phenology/points", params={"year": 2020, "threshold_frac": CUSTOM_THRESHOLD}, json=body
+    )
+
+    assert default.json()[0]["season_length"] == COMPUTED_SEASON_LENGTH
+    assert custom.json()[0]["season_length"] == CUSTOM_SEASON_LENGTH
+
+
 def test_repo_rejects_a_custom_threshold(app_memory):
     app_memory.state.phenology_repo.add_metric(product="ndvi_synth", metric=STORED)
     client = TestClient(app_memory)
