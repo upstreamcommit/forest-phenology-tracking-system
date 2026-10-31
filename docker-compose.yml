@@ -104,8 +104,9 @@ services:
       CACHE_BACKEND: redis
       REDIS_URL: redis://redis:6379/0
     volumes:
-      - fpts_data:/app/data/raw
-      - fpts_data:/app/data/seed
+      # Same volume root the seed jobs write to (raw/ and seed/ under /app/data);
+      # the API only reads it.
+      - fpts_data:/app/data:ro
     ports:
       - "8000:8000"
     depends_on:

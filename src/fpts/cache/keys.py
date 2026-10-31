@@ -5,7 +5,13 @@ import json
 
 from fpts.domain.models import Location
 
-DEFAULT_THRESHOLD_FRAC = 0.5
+# Keys hold exactly the inputs the uncached lookup uses (no rounding), so a cache hit always
+# returns what an uncached request would. Floats are written with repr(), which round-trips.
+
+
+def _f(x: float) -> str:
+    # float() first so numpy scalars and ints give the same key as the equal Python float.
+    return repr(float(x))
 
 
 def _stable_json_hash(obj: dict) -> str:
@@ -41,12 +47,20 @@ def timeseries_cache_key(
     start_year: int,
     end_year: int,
 ) -> str:
-    lat = round(location.lat, 6)
-    lon = round(location.lon, 6)
-    return f"phenology:timeseries:{product}:{lat}:{lon}:{start_year}:{end_year}"
+    return (
+        f"phenology:timeseries:{product}:{_f(location.lat)}:{_f(location.lon)}:"
+        f"{start_year}:{end_year}"
+    )
 
 
-def point_metric_cache_key(
+def repo_point_cache_key(*, product: str, year: int, location: Location) -> str:
+    """
+    Key for a stored (repository) point metric. Stored metrics do not depend on a threshold.
+    """
+    return f"phenology:point:repo:{product}:{year}:{_f(location.lat)}:{_f(location.lon)}"
+
+
+def compute_point_cache_key(
     *,
     product: str,
     year: int,
@@ -54,12 +68,9 @@ def point_metric_cache_key(
     threshold_frac: float,
 ) -> str:
     """
-    Normalize floats so equivalent requests map to the same key.
-
-    - lat/lon rounded to 6dp: ~0.11m precision at equator (more than enough here)
-    - threshold rounded to 3dp
+    Key for a point metric computed from the raster stack with the given threshold.
     """
-    lat = round(location.lat, 6)
-    lon = round(location.lon, 6)
-    thr = round(threshold_frac, 3)
-    return f"phenology:point:{product}:{year}:{lat}:{lon}:{thr}"
+    return (
+        f"phenology:point:compute:{product}:{year}:"
+        f"{_f(location.lat)}:{_f(location.lon)}:{_f(threshold_frac)}"
+    )

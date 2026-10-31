@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 from fpts.cache.keys import (
     area_stats_cache_key,
-    point_metric_cache_key,
+    repo_point_cache_key,
     timeseries_cache_key,
 )
 from fpts.cache.redis_cache import RedisTTLCache
@@ -50,18 +50,12 @@ class QueryService:
         product: str,
         location: Location,
         year: int,
-        threshold_frac: float = 0.5,
     ) -> Optional[PhenologyMetric]:
         """
-        Return phenology metric for a single location and year, or None if not found
+        Return the stored phenology metric for a single location and year, or None if not found
         """
         if self._point_cache is not None:
-            key = point_metric_cache_key(
-                product=product,
-                year=year,
-                location=location,
-                threshold_frac=threshold_frac,
-            )
+            key = repo_point_cache_key(product=product, year=year, location=location)
             cached = self._point_cache.get(key)
             logger.debug("cache_lookup", extra={"cache": "point_metric_repo", "key": key})
             if cached is not None:

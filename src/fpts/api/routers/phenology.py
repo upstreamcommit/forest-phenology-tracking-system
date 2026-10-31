@@ -1,6 +1,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 
 from fpts.api.dependencies import get_phenology_compute_service, get_query_service
 from fpts.api.schemas import (
@@ -14,6 +15,7 @@ from fpts.api.schemas import (
     SeasonLengthStat,
 )
 from fpts.domain.models import Location
+from fpts.processing.phenology_algorithm import DEFAULT_THRESHOLD_FRAC
 from fpts.processing.phenology_service import PhenologyComputationService
 from fpts.query.service import QueryService
 from fpts.utils.logging import get_logger
@@ -38,10 +40,14 @@ def get_point_phenology(
     ),
     product: str = Query("ndvi_synth", min_length=1, description="Product to analyse."),
     threshold_frac: float = Query(
-        0.5,
+        DEFAULT_THRESHOLD_FRAC,
         gt=0.0,
         lt=1.0,
-        description="Fraction value used in calculating SOS and EOS limits.",
+        description=(
+            "Fraction of the seasonal NDVI amplitude used for SOS/EOS when computing. "
+            "Stored metrics only exist for the default, so any other value is rejected in "
+            "mode=repo and makes mode=auto compute directly."
+        ),
     ),
     query_service: QueryService = Depends(get_query_service),
     compute_service: PhenologyComputationService = Depends(get_phenology_compute_service),
@@ -57,7 +63,7 @@ def get_point_phenology(
 
     mode=auto:
       Tries to read from repo, and falls back to compute from NDVI raster stack on the fly
-      (currently synthetic NDVI stack).
+      (currently synthetic NDVI stack). With a non-default threshold_frac it computes directly.
     """
     logger.info(
         "point_query_received",
@@ -72,15 +78,31 @@ def get_point_phenology(
     )
 
     location = Location(lat=lat, lon=lon)
+    # Stored metrics are not tied to a threshold, so only the default can be served from the repo.
+    custom_threshold = threshold_frac != DEFAULT_THRESHOLD_FRAC
 
-    if mode == "repo":
-        metric = query_service.get_point_metric(
-            product=product,
-            location=location,
-            year=year,
-            threshold_frac=threshold_frac,
+    if mode == "repo" and custom_threshold:
+        # Same 422 body as FastAPI's own parameter validation, which OpenAPI documents.
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("query", "threshold_frac"),
+                    "msg": (
+                        "threshold_frac only applies when computing: use mode=compute or "
+                        "mode=auto, or omit it to read stored metrics "
+                        f"(default {DEFAULT_THRESHOLD_FRAC})"
+                    ),
+                    # FastAPI reports query inputs as the raw string; match that.
+                    "input": str(threshold_frac),
+                }
+            ]
         )
-        if metric is None:
+
+    metric = None
+    if mode in ("repo", "auto") and not custom_threshold:
+        metric = query_service.get_point_metric(product=product, location=location, year=year)
+        if metric is None and mode == "repo":
             raise HTTPException(
                 status_code=404,
                 detail=(
@@ -89,7 +111,7 @@ def get_point_phenology(
                 ),
             )
 
-    elif mode == "compute":
+    if metric is None:  # mode=compute, or auto after a repo miss or with a custom threshold
         try:
             metric = compute_service.compute_point_phenology(
                 product=product,
@@ -99,24 +121,6 @@ def get_point_phenology(
             )
         except FileNotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
-
-    else:  # mode == "auto"
-        metric = query_service.get_point_metric(
-            product=product,
-            location=location,
-            year=year,
-            threshold_frac=threshold_frac,
-        )
-        if metric is None:
-            try:
-                metric = compute_service.compute_point_phenology(
-                    product=product,
-                    year=year,
-                    location=location,
-                    threshold_frac=threshold_frac,
-                )
-            except FileNotFoundError as e:
-                raise HTTPException(status_code=404, detail=str(e)) from e
 
     return PhenologyPointResponse(
         year=metric.year,
@@ -134,17 +138,20 @@ def get_points_phenology(
     year: int = Query(..., ge=2000, le=2027, description="Year we want to analyse."),
     product: str = Query("ndvi_synth", min_length=1, description="Product to analyse."),
     threshold_frac: float = Query(
-        0.5, gt=0.0, lt=1.0, description="Fraction value used in SOS/EOS limits."
+        DEFAULT_THRESHOLD_FRAC, gt=0.0, lt=1.0, description="Fraction value used in SOS/EOS limits."
     ),
     compute_service: PhenologyComputationService = Depends(get_phenology_compute_service),
 ):
     locations = [Location(lat=loc.lat, lon=loc.lon) for loc in body.locations]
-    metrics = compute_service.compute_points_phenology(
-        product=product,
-        year=year,
-        locations=locations,
-        threshold_frac=threshold_frac,
-    )
+    try:
+        metrics = compute_service.compute_points_phenology(
+            product=product,
+            year=year,
+            locations=locations,
+            threshold_frac=threshold_frac,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     return [
         PhenologyPointResponse(
             year=m.year,
