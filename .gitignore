@@ -25,7 +25,8 @@ poetry.lock
 # ------------------------
 .env
 *.env
-.env.test
+.env.*
+!.env.example
 *.env.test
 
 # ------------------------
@@ -45,6 +46,14 @@ mypy_cache/
 ruff_cache/
 pytest_cache/
 *.log
+.coverage
+htmlcov/
+
+# ------------------------
+# AI assistant (personal, not shared)
+# ------------------------
+CLAUDE.local.md
+.claude/settings.local.json
 
 # ------------------------
 # OS Files
