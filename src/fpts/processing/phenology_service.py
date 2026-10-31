@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 import xarray as xr
 
-from fpts.cache.keys import point_metric_cache_key
+from fpts.cache.keys import compute_point_cache_key
 from fpts.cache.redis_cache import RedisTTLCache
 from fpts.cache.ttl_cache import InMemoryTTLCache
 from fpts.domain.models import Location, PhenologyMetric
@@ -14,7 +14,10 @@ from fpts.processing.ndvi_stack import (
     extract_ndvi_timeseries_batch,
     load_ndvi_stack,
 )
-from fpts.processing.phenology_algorithm import compute_sos_eos_threshold
+from fpts.processing.phenology_algorithm import (
+    DEFAULT_THRESHOLD_FRAC,
+    compute_sos_eos_threshold,
+)
 from fpts.storage.raster_repository import RasterRepository
 from fpts.utils.logging import get_logger
 
@@ -50,10 +53,10 @@ class PhenologyComputationService:
         product: str,
         year: int,
         location: Location,
-        threshold_frac: float = 0.5,
+        threshold_frac: float = DEFAULT_THRESHOLD_FRAC,
         is_forest: bool = True,
     ) -> PhenologyMetric:
-        point_cache_key = point_metric_cache_key(
+        point_cache_key = compute_point_cache_key(
             product=product,
             year=year,
             location=location,
@@ -64,18 +67,18 @@ class PhenologyComputationService:
             cached = self._point_cache.get(point_cache_key)
             logger.debug(
                 "cache_lookup",
-                extra={"cache": "point_metric_repo", "key": point_cache_key},
+                extra={"cache": "point_metric_compute", "key": point_cache_key},
             )
             if cached is not None:
                 logger.debug(
                     "cache_hit",
-                    extra={"cache": "point_metric_repo", "key": point_cache_key},
+                    extra={"cache": "point_metric_compute", "key": point_cache_key},
                 )
                 return cached
 
             logger.debug(
                 "cache_miss",
-                extra={"cache": "point_metric_repo", "key": point_cache_key},
+                extra={"cache": "point_metric_compute", "key": point_cache_key},
             )
 
         stack_cache_key = (product, year)
@@ -120,7 +123,7 @@ class PhenologyComputationService:
         product: str,
         year: int,
         locations: Sequence[Location],
-        threshold_frac: float = 0.5,
+        threshold_frac: float = DEFAULT_THRESHOLD_FRAC,
         is_forest: bool = True,
     ) -> list[PhenologyMetric]:
         """

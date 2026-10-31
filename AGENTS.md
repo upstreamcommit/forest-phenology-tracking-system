@@ -27,6 +27,7 @@ Run everything from the repository root.
 | Lint | `poetry run ruff check src tests` |
 | Format | `poetry run ruff format src tests` |
 | Full stack | `docker compose up --build`, API on http://localhost:8000 (`/docs` for OpenAPI) |
+| Stack smoke test | `./compose_smoke_test.sh` against the running stack (README examples and cache separation) |
 | Stack teardown | `docker compose down --remove-orphans` (add `-v` only to wipe the DB and data volumes) |
 | API without Docker | `PHENOLOGY_REPO_BACKEND=memory DATA_DIR=tests/fixtures poetry run uvicorn fpts.api.main:app --reload` |
 | Frontend | `cd frontend && npm install && npm run dev` |
@@ -78,8 +79,8 @@ mean they did not run.
 - `fpts.api.main` builds an app at import time (`app = create_app()`), so importing it reads `Settings` from the environment and `.env`.
 - Raster stacks are read from `{DATA_DIR}/raw/{product}/{year}/doy_NNN.tif` and are assumed to be EPSG:4326 with x = lon, y = lat.
 - Repository point and timeseries lookups match lat/lon by exact float equality, so only exact seed-grid coordinates hit.
-- `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The synthetic stack covers none of the 0.1 degree seed-grid points, so no coordinate is answered by both.
-- Known bugs that affect manual testing until fixed: both modes share one point cache, so within the 5-minute TTL one mode can return the other's result (`API-01`); and inside `docker compose` compute mode returns 404 because the data volume is mounted one level too deep (`OPS-01`). Use the no-Docker command to exercise compute mode.
+- `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The synthetic stack covers none of the 0.1 degree seed-grid points, so no coordinate is answered by both. Use `lat=51.5&lon=-0.5` for repo and pixel centres such as `lat=51.495&lon=-0.495` (year 2020) for compute.
+- Cache keys hold the exact inputs of the uncached lookup and are namespaced by source (`cache/keys.py`). Keep it that way: a cache hit must never change a response.
 
 ## Safety
 

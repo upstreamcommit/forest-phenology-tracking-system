@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
+# Fraction of the seasonal amplitude used for SOS/EOS when the caller does not choose one.
+DEFAULT_THRESHOLD_FRAC = 0.5
+
 
 @dataclass(frozen=True)
 class PhenologyDates:
@@ -14,7 +17,7 @@ class PhenologyDates:
 def compute_sos_eos_threshold(
     ndvi: Sequence[float],
     doys: Sequence[int],
-    frac: float = 0.5,
+    frac: float = DEFAULT_THRESHOLD_FRAC,
 ) -> PhenologyDates:
     """
     Compute Start/End of Season (SOS/EOS) from an NDVI time series using a dynamic threshold.

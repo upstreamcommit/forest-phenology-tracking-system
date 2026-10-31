@@ -83,19 +83,24 @@ Returns phenology metrics for a single location and year.
 Parameters:
 - lat
 - lon
-- mode
+- mode: `repo` (stored metrics, default), `compute` (calculated from the NDVI raster stack) or `auto` (stored first, then compute)
 - year
 - product
+- threshold_frac (optional, compute only): fraction of the seasonal amplitude used for SOS/EOS, default 0.5
 
 Behaviour:
 -   200 → Data found
 -   404 → No data for that location/year
+-   422 → Location outside the raster stack (compute), or a non-default `threshold_frac` with `mode=repo`
 
-Sample query
+The two modes read different synthetic datasets:
+- **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`.
+- **Raster stack (`mode=compute`)**: a 10x10 NDVI stack for 2020 only, covering lon -0.5 to -0.4 and lat 51.4 to 51.5 at 0.01°. Use pixel-centre coordinates such as `lat=51.495&lon=-0.495`; other points in that box can currently be rejected as out of coverage.
+
+Sample queries
 ```bash
-curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=repo"
+curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo"
 ```
-If the above query returns no data found, try it with compute mode:
 ```bash
 curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=compute"
 ```
@@ -186,6 +191,11 @@ docker compose down -v --remove-orphans
 ```
 
 ### Other relevant/ useful commands
+
+- Smoke-test the running stack with the sample queries above (Run in another terminal tab)
+```bash
+./compose_smoke_test.sh
+```
 
 - Check tables present in Docker container (Run in another terminal tab)
 ```bash
