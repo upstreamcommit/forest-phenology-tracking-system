@@ -1,4 +1,4 @@
-FROM postgis/postgis:16-3.4
+FROM postgis/postgis:18-3.6
 
 # Copy init scripts into the image to avoid Docker Desktop bind-mount flakiness
 COPY ./src/fpts/sql/ddl/ /docker-entrypoint-initdb.d/
