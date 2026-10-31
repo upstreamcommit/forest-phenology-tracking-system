@@ -1,3 +1,6 @@
+# Own project name so `down -v --remove-orphans` never touches the dev stack.
+name: fpts-test
+
 services:
   postgis_test:
     build:

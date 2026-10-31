@@ -216,11 +216,17 @@ npm run dev
 Run tests:
 
 - (UNIT): `poetry run pytest -q`
-- (INTEGRATION ONLY):
+- (UNIT + INTEGRATION, one command): `./precommit_tests.sh`
+    - Starts the test database, runs every test and tears the database down again.
+    - The test stack uses its own compose project (`fpts-test`), so it never touches the dev stack.
+- (INTEGRATION ONLY, step by step):
     - For all integration tests, execute the following commands in order:
     - Start the test database:
         - `docker compose -f docker-compose.test.yml down -v --remove-orphans`
-        - `docker compose -f docker-compose.test.yml up -d --build --force-recreate`
+        - `docker compose -f docker-compose.test.yml up -d --build --force-recreate --wait`
+    - Point the tests at it (without this, integration tests are skipped):
+        - `export FPTS_TEST_DATABASE_DSN=postgresql://postgres:postgres@localhost:55432/fpts_test`
+        - Optionally `export FPTS_REQUIRE_INTEGRATION=1` to make a missing DSN fail instead of skip.
     - (OPTIONAL) Verify schema exists
         -  `docker compose -f docker-compose.test.yml exec -T postgis_test psql -U postgres -d fpts_test -c "\dt public.*"`
     - Run integration tests ONLY:
@@ -229,6 +235,11 @@ Run tests:
         - `poetry run pytest -m "integration or not integration"`
     - Tear down
         - `docker compose -f docker-compose.test.yml down -v --remove-orphans`
+
+Git hooks (lint on commit, full test suite on push):
+
+- `poetry run pre-commit install --hook-type pre-commit --hook-type pre-push`
+- Lint uses the ruff version pinned in `poetry.lock`, the same one CI runs.
 
 ------------------------------------------------------------------------
 

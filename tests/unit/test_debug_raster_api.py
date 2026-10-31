@@ -3,9 +3,10 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from fastapi.testclient import TestClient
+from rasterio.transform import from_origin
+
 from fpts.api.main import create_app
 from fpts.config.settings import Settings
-from rasterio.transform import from_origin
 
 
 def test_debug_raster_sample_endpoint(tmp_path: Path):

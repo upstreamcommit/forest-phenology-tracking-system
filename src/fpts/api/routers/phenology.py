@@ -85,7 +85,7 @@ def get_point_phenology(
                 status_code=404,
                 detail=(
                     f"No phenology data found for product: {product}, "
-                    f"location: Location(lat={lat}, lon={lon}) and year: {year}",
+                    f"location: lat={lat}, lon={lon} and year: {year}"
                 ),
             )
 
@@ -187,7 +187,7 @@ def get_point_timeseries(
 
     if end_year < start_year:
         raise HTTPException(
-            status_code=400, detail="Invalid parameters: end_year must be <= start_year"
+            status_code=400, detail="Invalid parameters: end_year must be >= start_year"
         )
 
     location = Location(lat=lat, lon=lon)
@@ -204,7 +204,7 @@ def get_point_timeseries(
             status_code=404,
             detail=(
                 f"No phenology data found for product: {product}, "
-                f"location: {location} and year range {start_year} : {end_year}",
+                f"location: lat={lat}, lon={lon} and year range: {start_year}-{end_year}"
             ),
         )
 
@@ -270,7 +270,7 @@ def get_area_phenology_stats(
             status_code=404,
             detail=(
                 "No phenology data found intersecting this polygon "
-                f"for product: {product} and year: {year}",
+                f"for product: {product} and year: {year}"
             ),
         )
 

@@ -1,6 +1,7 @@
 from datetime import date
 
 from fastapi.testclient import TestClient
+
 from fpts.domain.models import Location, PhenologyMetric
 
 
@@ -58,16 +59,50 @@ def test_phenology_point_returns_404_for_missing_metric(
         },
     )
 
+    assert resp.status_code == 404
     detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail == (
+        f"No phenology data found for product: {test_product}, "
+        f"location: lat={lat}, lon={lon} and year: {year}"
+    )
 
-    if isinstance(detail, list):
-        detail = " ".join(detail)
+
+def test_phenology_timeseries_returns_400_when_year_range_invalid(app_memory):
+    client = TestClient(app_memory)
+    resp = client.get(
+        "/phenology/timeseries",
+        params={
+            "product": "test_product",
+            "lat": 52.5,
+            "lon": 13.4,
+            "start_year": 2022,
+            "end_year": 2020,
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "Invalid parameters: end_year must be >= start_year"
+
+
+def test_phenology_timeseries_returns_404_when_empty(app_memory):
+    client = TestClient(app_memory)
+    resp = client.get(
+        "/phenology/timeseries",
+        params={
+            "product": "test_product",
+            "lat": 52.5,
+            "lon": 13.4,
+            "start_year": 2018,
+            "end_year": 2022,
+        },
+    )
 
     assert resp.status_code == 404
-    assert "No phenology data found for product" in detail
-    assert f"{test_product}" in detail
-    assert f"{Location(lat=lat, lon=lon)}" in detail
-    assert f"{year}" in detail
+    assert resp.json()["detail"] == (
+        "No phenology data found for product: test_product, "
+        "location: lat=52.5, lon=13.4 and year range: 2018-2022"
+    )
 
 
 def test_phenology_point_compute_mode_returns_200(app_memory):

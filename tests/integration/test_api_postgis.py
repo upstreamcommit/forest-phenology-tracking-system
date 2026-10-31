@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+
 from fpts.domain.models import Location, PhenologyMetric
 
 
@@ -52,16 +53,13 @@ def test_phenology_point_returns_404_for_missing_metric(
         },
     )
 
-    detail = resp.json()["detail"]
-
-    if isinstance(detail, list):
-        detail = " ".join(detail)
-
     assert resp.status_code == 404
-    assert "No phenology data found" in detail
-    assert f"{product}" in detail
-    assert f"{Location(lat=lat, lon=lon)}" in detail
-    assert f"{year}" in detail
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail == (
+        f"No phenology data found for product: {product}, "
+        f"location: lat={lat}, lon={lon} and year: {year}"
+    )
 
 
 @pytest.mark.integration
@@ -169,17 +167,13 @@ def test_phenology_timeseries_returns_404_when_empty(
         },
     )
 
-    detail = resp.json()["detail"]
-
-    if isinstance(detail, list):
-        detail = " ".join(detail)
-
     assert resp.status_code == 404
-    assert "No phenology data found" in detail
-    assert f"{product}" in detail
-    assert f"{Location(lat=lat, lon=lon)}" in detail
-    assert f"{start_year}" in detail
-    assert f"{end_year}" in detail
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail == (
+        f"No phenology data found for product: {product}, "
+        f"location: lat={lat}, lon={lon} and year range: {start_year}-{end_year}"
+    )
 
 
 @pytest.mark.integration
@@ -277,15 +271,12 @@ def test_phenology_area_returns_404_when_no_matches(app_postgis, product="test_p
         json={"geometry": poly},
     )
 
-    detail = resp.json()["detail"]
-
-    if isinstance(detail, list):
-        detail = " ".join(detail)
-
     assert resp.status_code == 404
-    assert "No phenology data found intersecting this polygon" in detail
-    assert f"{product}" in detail
-    assert f"{year}" in detail
+    detail = resp.json()["detail"]
+    assert isinstance(detail, str)
+    assert detail == (
+        f"No phenology data found intersecting this polygon for product: {product} and year: {year}"
+    )
 
 
 @pytest.mark.integration
@@ -573,7 +564,7 @@ def test_phenology_timeseries_returns_400_when_year_range_invalid(app_postgis):
         },
     )
     assert resp.status_code == 400
-    assert resp.json()["detail"] == "Invalid parameters: end_year must be <= start_year"
+    assert resp.json()["detail"] == "Invalid parameters: end_year must be >= start_year"
 
 
 @pytest.mark.integration
