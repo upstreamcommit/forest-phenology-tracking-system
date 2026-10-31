@@ -23,6 +23,9 @@ from fpts.utils.logging import get_logger
 
 logger = get_logger("fpts.cache.PhenologyService")
 
+# There is no land-cover source yet, so computed metrics report every point as forest.
+ASSUMED_FOREST = True
+
 
 def _date_from_doy(year: int, doy: int) -> date:
     return date(year, 1, 1) + timedelta(days=doy - 1)
@@ -54,7 +57,6 @@ class PhenologyComputationService:
         year: int,
         location: Location,
         threshold_frac: float = DEFAULT_THRESHOLD_FRAC,
-        is_forest: bool = True,
     ) -> PhenologyMetric:
         point_cache_key = compute_point_cache_key(
             product=product,
@@ -110,7 +112,7 @@ class PhenologyComputationService:
             sos_date=sos_date,
             eos_date=eos_date,
             season_length=dates.season_length,
-            is_forest=is_forest,
+            is_forest=ASSUMED_FOREST,
         )
 
         if self._point_cache is not None:
@@ -124,7 +126,6 @@ class PhenologyComputationService:
         year: int,
         locations: Sequence[Location],
         threshold_frac: float = DEFAULT_THRESHOLD_FRAC,
-        is_forest: bool = True,
     ) -> list[PhenologyMetric]:
         """
         Batch compute phenology metrics for many points.
@@ -169,7 +170,7 @@ class PhenologyComputationService:
                     sos_date=sos_date,
                     eos_date=eos_date,
                     season_length=dates.season_length,
-                    is_forest=is_forest,
+                    is_forest=ASSUMED_FOREST,
                 )
             )
 

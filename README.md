@@ -86,16 +86,16 @@ Parameters:
 - mode: `repo` (stored metrics, default), `compute` (calculated from the NDVI raster stack) or `auto` (stored first, then compute)
 - year
 - product
-- threshold_frac (optional, compute only): fraction of the seasonal amplitude used for SOS/EOS, default 0.5
+- threshold_frac (optional, default 0.5): fraction of the seasonal amplitude used for SOS/EOS when computing. Stored metrics only exist for the default, so another value is rejected with `mode=repo` and makes `mode=auto` skip stored metrics and compute directly.
 
 Behaviour:
 -   200 → Data found
 -   404 → No data for that location/year
--   422 → Location outside the raster stack (compute), or a non-default `threshold_frac` with `mode=repo`
+-   422 → Location outside the raster stack (`mode=compute`, or `mode=auto` without a stored row), a non-default `threshold_frac` with `mode=repo`, or invalid parameters
 
 The two modes read different synthetic datasets:
 - **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`.
-- **Raster stack (`mode=compute`)**: a 10x10 NDVI stack for 2020 only, covering lon -0.5 to -0.4 and lat 51.4 to 51.5 at 0.01°. Use pixel-centre coordinates such as `lat=51.495&lon=-0.495`; other points in that box can currently be rejected as out of coverage.
+- **Raster stack (`mode=compute`)**: a 10x10 NDVI stack for 2020 only, covering lon -0.5 to -0.4 and lat 51.4 to 51.5 at 0.01°. Any point strictly inside a pixel works; pixel centres such as `lat=51.495&lon=-0.495` are safest. Points exactly on a pixel edge (multiples of 0.01°, such as `51.45,-0.45`) may currently be rejected as out of coverage.
 
 Sample queries
 ```bash

@@ -1,6 +1,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 
 from fpts.api.dependencies import get_phenology_compute_service, get_query_service
 from fpts.api.schemas import (
@@ -81,12 +82,20 @@ def get_point_phenology(
     custom_threshold = threshold_frac != DEFAULT_THRESHOLD_FRAC
 
     if mode == "repo" and custom_threshold:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "threshold_frac only applies when computing: use mode=compute or mode=auto, "
-                f"or omit it to read stored metrics (default {DEFAULT_THRESHOLD_FRAC})"
-            ),
+        # Same 422 body as FastAPI's own parameter validation, which OpenAPI documents.
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("query", "threshold_frac"),
+                    "msg": (
+                        "threshold_frac only applies when computing: use mode=compute or "
+                        "mode=auto, or omit it to read stored metrics "
+                        f"(default {DEFAULT_THRESHOLD_FRAC})"
+                    ),
+                    "input": threshold_frac,
+                }
+            ]
         )
 
     metric = None

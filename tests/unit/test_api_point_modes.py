@@ -60,24 +60,45 @@ def test_auto_prefers_the_stored_row(app_memory):
     assert resp.json()["season_length"] == STORED.season_length
 
 
+# threshold_frac=0.2 -> 0.1 + 0.2 * 0.6 = 0.22, first/last value >= 0.22 at DOY 150 and 300.
+# It must differ from the default's answer, or a dropped threshold would go unnoticed.
+CUSTOM_THRESHOLD = 0.2
+CUSTOM_SEASON_LENGTH = 150
+CUSTOM_EOS = "2020-10-26"
+
+
 def test_auto_with_a_custom_threshold_computes_directly(app_memory):
     app_memory.state.phenology_repo.add_metric(product="ndvi_synth", metric=STORED)
     client = TestClient(app_memory)
 
-    resp = _get(client, mode="auto", threshold_frac=0.3)
+    resp = _get(client, mode="auto", threshold_frac=CUSTOM_THRESHOLD)
     assert resp.status_code == 200
-    # threshold 0.1 + 0.3 * 0.6 = 0.28 -> first/last value >= 0.28 at DOY 150 and 250
-    assert resp.json()["season_length"] == COMPUTED_SEASON_LENGTH
-    assert resp.json()["season_length"] != STORED.season_length
+    assert resp.json()["season_length"] == CUSTOM_SEASON_LENGTH
+    assert resp.json()["eos_date"] == CUSTOM_EOS
+
+
+def test_compute_caches_each_threshold_separately(app_memory):
+    client = TestClient(app_memory)
+
+    default = _get(client, mode="compute")
+    custom = _get(client, mode="compute", threshold_frac=CUSTOM_THRESHOLD)
+    default_again = _get(client, mode="compute")
+
+    assert default.json()["season_length"] == COMPUTED_SEASON_LENGTH
+    assert custom.json()["season_length"] == CUSTOM_SEASON_LENGTH
+    assert default_again.json()["season_length"] == COMPUTED_SEASON_LENGTH
 
 
 def test_repo_rejects_a_custom_threshold(app_memory):
     app_memory.state.phenology_repo.add_metric(product="ndvi_synth", metric=STORED)
     client = TestClient(app_memory)
 
-    resp = _get(client, mode="repo", threshold_frac=0.3)
+    resp = _get(client, mode="repo", threshold_frac=CUSTOM_THRESHOLD)
     assert resp.status_code == 422
-    assert "threshold_frac only applies when computing" in resp.json()["detail"]
+    # Same shape as FastAPI's own validation errors (documented in OpenAPI as HTTPValidationError)
+    [error] = resp.json()["detail"]
+    assert error["loc"] == ["query", "threshold_frac"]
+    assert "threshold_frac only applies when computing" in error["msg"]
 
 
 def test_repo_accepts_the_default_threshold_explicitly(app_memory):

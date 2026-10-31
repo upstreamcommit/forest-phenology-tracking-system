@@ -9,6 +9,11 @@ from fpts.domain.models import Location
 # returns what an uncached request would. Floats are written with repr(), which round-trips.
 
 
+def _f(x: float) -> str:
+    # float() first so numpy scalars and ints give the same key as the equal Python float.
+    return repr(float(x))
+
+
 def _stable_json_hash(obj: dict) -> str:
     """
     Stable hash for GeoJSON / params dictionaries.
@@ -43,7 +48,8 @@ def timeseries_cache_key(
     end_year: int,
 ) -> str:
     return (
-        f"phenology:timeseries:{product}:{location.lat!r}:{location.lon!r}:{start_year}:{end_year}"
+        f"phenology:timeseries:{product}:{_f(location.lat)}:{_f(location.lon)}:"
+        f"{start_year}:{end_year}"
     )
 
 
@@ -51,7 +57,7 @@ def repo_point_cache_key(*, product: str, year: int, location: Location) -> str:
     """
     Key for a stored (repository) point metric. Stored metrics do not depend on a threshold.
     """
-    return f"phenology:point:repo:{product}:{year}:{location.lat!r}:{location.lon!r}"
+    return f"phenology:point:repo:{product}:{year}:{_f(location.lat)}:{_f(location.lon)}"
 
 
 def compute_point_cache_key(
@@ -66,5 +72,5 @@ def compute_point_cache_key(
     """
     return (
         f"phenology:point:compute:{product}:{year}:"
-        f"{location.lat!r}:{location.lon!r}:{threshold_frac!r}"
+        f"{_f(location.lat)}:{_f(location.lon)}:{_f(threshold_frac)}"
     )

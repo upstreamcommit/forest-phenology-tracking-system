@@ -79,7 +79,7 @@ mean they did not run.
 - `fpts.api.main` builds an app at import time (`app = create_app()`), so importing it reads `Settings` from the environment and `.env`.
 - Raster stacks are read from `{DATA_DIR}/raw/{product}/{year}/doy_NNN.tif` and are assumed to be EPSG:4326 with x = lon, y = lat.
 - Repository point and timeseries lookups match lat/lon by exact float equality, so only exact seed-grid coordinates hit.
-- `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The synthetic stack covers none of the 0.1 degree seed-grid points, so no coordinate is answered by both. Use `lat=51.5&lon=-0.5` for repo and pixel centres such as `lat=51.495&lon=-0.495` (year 2020) for compute.
+- `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The synthetic stack covers none of the 0.1 degree seed-grid points, so no coordinate is answered by both. Use `lat=51.5&lon=-0.5` for repo and pixel centres such as `lat=51.495&lon=-0.495` (year 2020) for compute. Repo examples need the docker compose (PostGIS) stack: the memory backend starts with no stored metrics, so `mode=repo` always 404s there.
 - Cache keys hold the exact inputs of the uncached lookup and are namespaced by source (`cache/keys.py`). Keep it that way: a cache hit must never change a response.
 
 ## Safety

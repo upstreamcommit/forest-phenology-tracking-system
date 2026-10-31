@@ -25,6 +25,18 @@ def test_compute_point_key_keeps_the_exact_threshold():
     assert a != b
 
 
+def test_keys_do_not_depend_on_the_numeric_type():
+    import numpy as np
+
+    as_numpy = Location(lat=np.float64(51.495), lon=np.float64(-0.495))
+    assert repo_point_cache_key(product="p", year=2020, location=as_numpy) == repo_point_cache_key(
+        product="p", year=2020, location=LOC
+    )
+    assert compute_point_cache_key(
+        product="p", year=2020, location=LOC, threshold_frac=np.float64(0.5)
+    ) == compute_point_cache_key(product="p", year=2020, location=LOC, threshold_frac=0.5)
+
+
 def test_point_and_timeseries_keys_keep_exact_coordinates():
     near = Location(lat=51.4950001, lon=-0.495)
 
