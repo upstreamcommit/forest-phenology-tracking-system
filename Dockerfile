@@ -1,5 +1,5 @@
 # ---- builder ----
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 WORKDIR /build
 
 RUN apt-get update \
@@ -15,7 +15,7 @@ RUN poetry config virtualenvs.create false \
     && poetry build -f wheel
 
 # ---- runtime ----
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update \
