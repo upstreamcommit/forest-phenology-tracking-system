@@ -26,6 +26,8 @@ jobs:
     env:
       # used by tests/integration/conftest.py
       FPTS_TEST_DATABASE_DSN: postgresql://postgres:postgres@localhost:55432/fpts_test
+      # fail instead of skipping integration tests if the DSN is missing
+      FPTS_REQUIRE_INTEGRATION: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -54,14 +56,16 @@ jobs:
         run: |
           psql "$FPTS_TEST_DATABASE_DSN" -f src/fpts/sql/ddl/phenology_metrics.sql
 
+      # Uses the ruff pinned in poetry.lock, the same one the pre-commit hooks run.
       - name: Lint (ruff)
-        uses: pre-commit/action@v3.0.1
-        with:
-          extra_args: --all-files
+        run: |
+          poetry run ruff check src tests
+          poetry run ruff format --check src tests
 
       - name: Unit tests (pytest + coverage)
         run: |
-          poetry run pytest -q -m "not integration" --cov=src/fpts --cov-report=term-missing
+          poetry run pytest -q -m "not integration" --cov=src/fpts --cov-report=term-missing \
+            --cov-fail-under=75
 
       - name: Integration tests (PostGIS)
         run: |

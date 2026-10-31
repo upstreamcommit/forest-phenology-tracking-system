@@ -4,6 +4,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+
 from fpts.api.main import create_app
 from fpts.config.settings import Settings
 
@@ -40,7 +41,12 @@ def postgis_dsn() -> str:
 
     dsn = os.getenv("FPTS_TEST_DATABASE_DSN")
     if not dsn:
-        pytest.skip("Set FPTS_TEST_DATABASE_DSN to run PostGIS integration tests")
+        message = "Set FPTS_TEST_DATABASE_DSN to run PostGIS integration tests"
+        # Callers that expect integration tests to run (pre-push hook, CI) set this so a
+        # missing DSN fails loudly instead of skipping all tests and exiting 0.
+        if os.getenv("FPTS_REQUIRE_INTEGRATION") == "1":
+            pytest.fail(message)
+        pytest.skip(message)
     _wait_for_db(dsn)
     return dsn
 

@@ -3,10 +3,11 @@ from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.transform import from_origin
+
 from fpts.domain.models import Location
 from fpts.processing.phenology_service import PhenologyComputationService
 from fpts.storage.local_raster_repository import LocalRasterRepository
-from rasterio.transform import from_origin
 
 
 def _write_geotiff(path: Path, data: np.ndarray, transform) -> None:

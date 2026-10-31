@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 import psycopg
+
 from fpts.domain.models import Location, PhenologyMetric
 from fpts.storage.postgis_phenology_repository import PostGISPhenologyRepository
 

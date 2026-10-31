@@ -1,13 +1,18 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.8
-    hooks:
-      - id: ruff
-        args: ["--fix"]
-      - id: ruff-format
-
+  # Use the ruff pinned in poetry.lock so pre-commit, CI and local runs agree.
   - repo: local
     hooks:
+      - id: ruff
+        name: ruff check
+        entry: poetry run ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: poetry run ruff format
+        language: system
+        types: [python]
+
       - id: integration-tests-docker
         name: Run docker-compose.test.yml + pytest
         entry: ./precommit_tests.sh
