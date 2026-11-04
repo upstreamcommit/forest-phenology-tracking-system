@@ -44,7 +44,14 @@ updates:
       # once every locked binary package publishes wheels for the new minor.
       - dependency-name: "python"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
-      # A Postgres major needs a data volume migration (or `docker compose down -v`) and a
-      # matching CI database, so it is a planned change, not a routine bump.
+      # A Postgres major needs a data volume migration (or `docker compose down -v`), so it is a
+      # planned change, not a routine bump. CI builds these same Dockerfiles, so it follows along.
       - dependency-name: "postgis/postgis"
         update-types: ["version-update:semver-major"]
+
+  # Images the compose files pull directly (today only redis:7-alpine, a major-only tag, so this
+  # proposes redis majors); the "docker" entry above only reads Dockerfiles.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "monthly"

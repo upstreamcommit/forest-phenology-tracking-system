@@ -17,10 +17,16 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d fpts"]
+      # Over TCP: while initdb runs the schema scripts, the entrypoint's temporary server listens
+      # on the unix socket only, so a socket check would report healthy too early.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d fpts"]
       interval: 2s
       timeout: 2s
       retries: 30
+      # Failures while initdb runs (slow under amd64 emulation) don't count towards retries;
+      # start_interval keeps probing every 2s meanwhile (the engine's default there is 5s).
+      start_period: 120s
+      start_interval: 2s
   redis:
     image: redis:7-alpine
     container_name: fpts-redis

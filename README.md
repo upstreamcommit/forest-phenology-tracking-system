@@ -252,10 +252,27 @@ Run tests:
     - Tear down
         - `docker compose -f docker-compose.test.yml down -v --remove-orphans`
 
+- Coverage: `./precommit_tests.sh` measures it over unit + integration tests and fails below the
+  floor, as CI does. By hand, with the test database up:
+  `FPTS_TEST_DATABASE_DSN=postgresql://postgres:postgres@localhost:55432/fpts_test FPTS_REQUIRE_INTEGRATION=1 poetry run pytest -m "integration or not integration" --cov`
+  (without the DSN the integration tests skip and the unit-only figure fails the floor). The scope
+  (all of `src/fpts` except the disabled batch job) and the `fail_under` floor are in
+  `pyproject.toml`.
+
 Git hooks (lint on commit, full test suite on push):
 
 - `poetry run pre-commit install --hook-type pre-commit --hook-type pre-push`
 - Lint uses the ruff version pinned in `poetry.lock`, the same one CI runs.
+
+CI (`.github/workflows/ci.yml`) runs on pull requests, on pushes to `main` and on demand from the
+Actions tab, in three jobs:
+
+- **python**: `poetry check --lock`, ruff, then unit and integration tests together with coverage
+  against the Postgres 18 / PostGIS 3.6 test database from `docker-compose.test.yml` (the same one
+  `./precommit_tests.sh` uses).
+- **stack**: builds every image, starts `docker compose`, and runs `./compose_smoke_test.sh`,
+  which must end with `all checks passed` (so the API log was checked for server exceptions).
+- **frontend**: `npm ci`, `npm run lint` and `npm run build` in `frontend/` on Node 24.
 
 ------------------------------------------------------------------------
 
@@ -264,7 +281,8 @@ Git hooks (lint on commit, full test suite on push):
 Production Hardening:
 
 -   Docker + docker-compose (API + PostGIS)
--   GitHub Actions CI (lint + tests + coverage)
+-   GitHub Actions CI (lint, unit + integration tests with coverage, compose stack smoke test,
+    frontend build)
 -   Structured logging
 -   Request logging middleware
 -   Optional Prometheus metrics endpoint

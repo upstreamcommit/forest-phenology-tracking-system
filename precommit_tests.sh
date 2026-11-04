@@ -17,5 +17,5 @@ trap cleanup EXIT
 docker compose -f "$COMPOSE_FILE" down -v --remove-orphans
 docker compose -f "$COMPOSE_FILE" up -d --build --force-recreate --wait
 
-# Run unit and integration tests
-poetry run pytest -m "integration or not integration"
+# Run unit and integration tests with the same coverage gate as CI (configured in pyproject.toml)
+poetry run pytest -m "integration or not integration" --cov --cov-report=term-missing

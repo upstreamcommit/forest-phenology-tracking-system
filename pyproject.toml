@@ -48,3 +48,18 @@ select = ["E", "F", "I"]  # pycodestyle errors, pyflakes, import sorting
 
 [tool.ruff.lint.isort]
 known-first-party = ["fpts"]
+
+# Used by `pytest --cov`. CI runs unit and integration tests together, so the figure covers both.
+[tool.coverage.run]
+source = ["src/fpts"]
+# The batch precompute job is disabled (it exits before running) and slated for replacement.
+omit = ["src/fpts/processing/batch/*"]
+
+[tool.coverage.report]
+# The measured unit + integration figure in November 2026 (68.07%), rounded down, so new untested
+# code fails the gate. Raise it as tests land; don't lower it to make a change pass.
+fail_under = 68
+# Compare to two decimals; at the default 0, coverage rounds 67.5% up to 68 and passes it.
+precision = 2
+# Also report unimported files in directories without __init__.py (such as src/fpts/sql/).
+include_namespace_packages = true

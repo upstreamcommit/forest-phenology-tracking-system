@@ -1,4 +1,5 @@
 FROM postgis/postgis:18-3.6
 
-# Copy the schema init SQL into the image so we don't rely on bind-mounts
-COPY ./src/fpts/sql/ddl/phenology_metrics.sql /docker-entrypoint-initdb.d/001_phenology_metrics.sql
+# Copy the schema init SQL into the image so we don't rely on bind-mounts. The whole directory,
+# like Dockerfile.postgis, so a new DDL file needs no edit here; initdb runs them in name order.
+COPY ./src/fpts/sql/ddl/ /docker-entrypoint-initdb.d/
