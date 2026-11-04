@@ -1,5 +1,5 @@
 .venv/
-__pycache__/
+**/__pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -8,8 +8,8 @@ __pycache__/
 .env.test
 dist/
 build/
-*.pyc
-.DS_Store
+**/*.pyc
+**/.DS_Store
 
 data/
 tests/

@@ -3,12 +3,48 @@
 #
 # Usage: docker compose up -d --build, then
 #   ./compose_smoke_test.sh
-# It first polls $BASE_URL/health (60 attempts, 2s apart, 5s timeout each).
+# It first polls $BASE_URL/health (60 attempts, 2s apart, 5s timeout each). After the HTTP checks
+# it fails if the $API_CONTAINER log shows a server exception during the run, since a correct
+# status code can still hide one.
 set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 BASE_URL="${BASE_URL%/}"
+API_CONTAINER="${API_CONTAINER:-fpts-api}"
 failures=0
+log_file="$(mktemp)"
+trap 'rm -f "$log_file"' EXIT
+
+# Server-log check: the API container's id, and how many of its log lines predate this run (a
+# line count rather than a timestamp, so host/VM clock skew can't hide errors). Empty until found.
+container_id=""
+log_start=""
+
+# Saves the API container's whole log (uvicorn writes to stderr) to $log_file.
+read_api_log() {
+  docker logs "$API_CONTAINER" >"$log_file" 2>&1
+}
+
+# Prints the API container's id; fails if docker or the container is missing.
+api_container_id() {
+  command -v docker >/dev/null 2>&1 \
+    && docker container inspect --format '{{.Id}}' "$API_CONTAINER" 2>/dev/null
+}
+
+# Looks up the API container. With "count", lines already in its log are skipped later;
+# otherwise the whole log belongs to this run.
+find_api_container() {
+  if ! container_id="$(api_container_id)"; then
+    container_id=""
+    return 0
+  fi
+  log_start=0
+  if [ "$1" = count ] && read_api_log; then
+    log_start="$(wc -l <"$log_file" | tr -d ' ')"
+  fi
+}
+
+find_api_container count
 
 for i in $(seq 1 60); do
   curl -fs -o /dev/null --max-time 5 "$BASE_URL/health" 2>/dev/null && break
@@ -18,6 +54,12 @@ for i in $(seq 1 60); do
   fi
   sleep 2
 done
+
+# A container created or replaced while we waited for /health (say, by a `docker compose up`
+# still in progress) holds only this run's log lines.
+if [ -z "$container_id" ] || [ "$(api_container_id)" != "$container_id" ]; then
+  find_api_container all
+fi
 
 check() {
   local expected="$1" label="$2"
@@ -61,8 +103,39 @@ check 422 "point, compute is not answered from the repo cache (out of raster cov
 check 422 "point, repo rejects a custom threshold" \
   "$P/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo&threshold_frac=0.3"
 
+# Server exceptions logged during the run, for example after a handler has already responded.
+if [ -n "$container_id" ]; then
+  sleep 1 # let log lines from the last requests arrive
+  if [ "$(api_container_id)" != "$container_id" ]; then
+    echo "FAIL $API_CONTAINER was removed or replaced during the run, so its log can't be checked"
+    failures=$((failures + 1))
+  elif ! read_api_log; then
+    echo "FAIL could not read the $API_CONTAINER log"
+    failures=$((failures + 1))
+  elif [ "$(wc -l <"$log_file" | tr -d ' ')" -lt "$log_start" ]; then
+    echo "FAIL the $API_CONTAINER log shrank during the run (rotated?), so it can't be checked"
+    failures=$((failures + 1))
+  else
+    errors="$(tail -n +"$((log_start + 1))" "$log_file" \
+      | grep -E 'Exception in ASGI application|Traceback \(most recent call last\)')"
+    if [ -n "$errors" ]; then
+      echo "FAIL $API_CONTAINER logged server exceptions:"
+      echo "$errors"
+      failures=$((failures + 1))
+    else
+      echo "ok   no server exceptions in the $API_CONTAINER log"
+    fi
+  fi
+else
+  echo "SKIP no $API_CONTAINER container found, so its log was not checked"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures check(s) failed"
   exit 1
 fi
-echo "all checks passed"
+if [ -n "$container_id" ]; then
+  echo "all checks passed"
+else
+  echo "all HTTP checks passed (server log not checked)"
+fi

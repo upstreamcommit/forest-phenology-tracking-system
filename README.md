@@ -29,8 +29,8 @@ contracts
 
 Backend
 
-- Language: Python (3.11+/3.12)
-- Environment & Packaging: Poetry
+- Language: Python 3.12
+- Environment & Packaging: Poetry 2
 - Web Framework: FastAPI
 - ASGI Server: Uvicorn
 - Configuration: pydantic-settings
@@ -45,8 +45,8 @@ Frontend
 ## Frontend Development
 
 Prerequisites:
-- Node.js >= 28
-- npm >= 11
+- Node.js 22.13+ or 24+ (the `engines` range in `frontend/package.json`)
+- npm >= 10
 
 ------------------------------------------------------------------------
 
@@ -161,11 +161,11 @@ curl "http://localhost:8000/phenology/area?year=2024&product=ndvi_synth&min_seas
 ## Getting started
 
 Prerequisites
-- Python 3.11+ (preferably 3.12).
-- Poetry Installed.
+- Python 3.12.
+- Poetry 2 (CI and the Docker image use 2.5.1).
 - (Optional) Git & GitHub for version control.
 - Docker
-- Node.js >= 20
+- Node.js 22.13+ or 24+
 - npm >= 10
 
 ------------------------------------------------------------------------
@@ -182,6 +182,12 @@ docker compose down -v --remove-orphans
 
 docker compose up --build
 ```
+
+The database runs Postgres 18 (PostGIS 3.6). A `db_data` volume created by an older Postgres
+major won't start with it: wipe it once with `docker compose down -v`. The `postgis/postgis`
+images are amd64-only, so the database runs under emulation on arm64: Docker Desktop and
+Rancher Desktop on Apple Silicon provide it, while a plain Docker Engine on arm64 Linux needs
+amd64 emulation registered first (`docker run --privileged --rm tonistiigi/binfmt --install amd64`).
 
 b. Tear down
 run `ctrl + c` to stop the container
@@ -207,7 +213,7 @@ docker exec -it fpts-postgis psql -U postgres -d fpts -c "\dt"
 ## Frontend Development
 
 cd frontend
-npm install
+npm ci
 npm run dev
 
 ------------------------------------------------------------------------

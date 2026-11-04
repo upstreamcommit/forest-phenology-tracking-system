@@ -6,6 +6,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgis-test
+    # postgis/postgis publishes amd64 images only; Apple Silicon runs them under emulation.
+    platform: linux/amd64
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

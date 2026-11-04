@@ -30,7 +30,7 @@ Run everything from the repository root.
 | Stack smoke test | `./compose_smoke_test.sh` against the running stack (README examples and cache separation) |
 | Stack teardown | `docker compose down --remove-orphans` (add `-v` only to wipe the DB and data volumes) |
 | API without Docker | `PHENOLOGY_REPO_BACKEND=memory DATA_DIR=tests/fixtures poetry run uvicorn fpts.api.main:app --reload` |
-| Frontend | `cd frontend && npm install && npm run dev` |
+| Frontend | `cd frontend && npm ci && npm run dev` (also `npm run build`, `npm run lint`) |
 
 Integration tests read `FPTS_TEST_DATABASE_DSN` (for the test compose DB:
 `postgresql://postgres:postgres@localhost:55432/fpts_test`) and skip when it is unset.
@@ -52,10 +52,10 @@ mean they did not run.
 
 ## Conventions
 
-- Python 3.12, Poetry. Ruff with line length 100 and rules E, F, I. Code must pass `ruff check` and `ruff format --check`.
+- Python 3.12 everywhere (local, CI and the Docker image). Poetry 2; CI and the image pin 2.5.1. Ruff with line length 100 and rules E, F, I. Code must pass `ruff check` and `ruff format --check`.
 - Keep the layering: routers -> services -> repositories -> SQL. Routers do not touch repositories or SQL directly.
 - All SQL lives in `src/fpts/sql/queries/`. Schema changes go in `src/fpts/sql/ddl/` and need a note in the PR (there is no migration tool yet). A new DDL file must also be added to `Dockerfile.postgis-test` and the CI `psql` step, and existing dev databases only pick it up after `docker compose down -v`.
-- Domain models in `src/fpts/domain/` are frozen dataclasses; API shapes are Pydantic models in `schemas.py`.
+- Domain models in `src/fpts/domain/` are frozen dataclasses (exceptions in `errors.py` are plain `Exception` subclasses, because frameworks set attributes such as `__traceback__` on them); API shapes are Pydantic models in `schemas.py`.
 - Configuration comes from `fpts.config.settings.Settings` (environment variables or `.env`). Add new settings there with a safe default.
 - Every behaviour change needs a test. Unit tests must not need Docker; anything that needs PostGIS goes in `tests/integration/` with the `integration` marker.
 - Tests assert correct behaviour. Never adjust a test to accommodate a bug; fix the bug or mark the test `xfail` with a reason.
@@ -80,6 +80,10 @@ mean they did not run.
 - Raster stacks are read from `{DATA_DIR}/raw/{product}/{year}/doy_NNN.tif` and are assumed to be EPSG:4326 with x = lon, y = lat.
 - Repository point and timeseries lookups match lat/lon by exact float equality, so only exact seed-grid coordinates hit.
 - `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The synthetic stack covers none of the 0.1 degree seed-grid points, so no coordinate is answered by both. Use `lat=51.5&lon=-0.5` for repo and pixel centres such as `lat=51.495&lon=-0.495` (year 2020) for compute. Repo examples need the docker compose (PostGIS) stack: the memory backend starts with no stored metrics, so `mode=repo` always 404s there.
+- The API image installs exactly the versions in `poetry.lock` (main group). After dependency changes, run `poetry lock` and `poetry sync`, or tests run on different versions from the image.
+- The `postgis/postgis` images are amd64-only, so both compose files pin `platform: linux/amd64` (Apple Silicon emulates it). Postgres 18 keeps data under `/var/lib/postgresql/18/`, so the dev volume mounts at `/var/lib/postgresql`. A volume from an older major needs `docker compose down -v`.
+- Dependabot groups take minor and patch updates only. It ignores Python (image) minor and major, Postgres major, and TypeScript minor and major updates; see `.github/dependabot.yml` for why. Those upgrades are deliberate PRs, and the ignores also stop Dependabot security updates for them.
+- The Poetry pins in `Dockerfile` and `.github/workflows/ci.yml` are bumped by hand, together. Dependabot regenerates `poetry.lock` with its own Poetry, so when reviewing its pip PRs check the lock header and `lock-version` against those pins.
 - Cache keys hold the exact inputs of the uncached lookup and are namespaced by source (`cache/keys.py`). Keep it that way: a cache hit must never change a response.
 
 ## Safety
