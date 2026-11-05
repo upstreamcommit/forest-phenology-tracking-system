@@ -23,7 +23,7 @@ Run everything from the repository root.
 |---|---|
 | Install | `poetry install` |
 | Unit tests | `poetry run pytest -q` (integration tests are deselected by `pytest.ini`) |
-| Unit + integration (needs Docker) | `./precommit_tests.sh` (starts an isolated PostGIS test DB on port 55432, runs unit and integration tests, tears it down) |
+| Unit + integration (needs Docker) | `./precommit_tests.sh` (starts an isolated PostGIS test DB on port 55432, runs unit and integration tests with the coverage gate, tears it down) |
 | Lint | `poetry run ruff check src tests` |
 | Format | `poetry run ruff format src tests` |
 | Full stack | `docker compose up --build`, API on http://localhost:8000 (`/docs` for OpenAPI) |
@@ -31,6 +31,15 @@ Run everything from the repository root.
 | Stack teardown | `docker compose down --remove-orphans` (add `-v` only to wipe the DB and data volumes) |
 | API without Docker | `PHENOLOGY_REPO_BACKEND=memory DATA_DIR=tests/fixtures poetry run uvicorn fpts.api.main:app --reload` |
 | Frontend | `cd frontend && npm ci && npm run dev` (also `npm run build`, `npm run lint`) |
+
+CI (`.github/workflows/ci.yml`) runs on pull requests, pushes to `main` and manual dispatch, in
+three jobs whose names are the check names: `python` (`poetry check --lock`, ruff, unit +
+integration tests with coverage on the `docker-compose.test.yml` database), `stack`
+(`docker compose build` and `up`, then `./compose_smoke_test.sh`, whose last line must be
+`all checks passed`) and `frontend` (`npm ci`, `npm run lint`, `npm run build` on Node 24).
+Coverage scope and the `fail_under` floor are in `pyproject.toml`. The floor sits at the measured
+figure, so new code without tests fails the gate; raise it when coverage rises, never lower it to
+get a change through.
 
 Integration tests read `FPTS_TEST_DATABASE_DSN` (for the test compose DB:
 `postgresql://postgres:postgres@localhost:55432/fpts_test`) and skip when it is unset.
@@ -54,7 +63,7 @@ mean they did not run.
 
 - Python 3.12 everywhere (local, CI and the Docker image). Poetry 2; CI and the image pin 2.5.1. Ruff with line length 100 and rules E, F, I. Code must pass `ruff check` and `ruff format --check`.
 - Keep the layering: routers -> services -> repositories -> SQL. Routers do not touch repositories or SQL directly.
-- All SQL lives in `src/fpts/sql/queries/`. Schema changes go in `src/fpts/sql/ddl/` and need a note in the PR (there is no migration tool yet). A new DDL file must also be added to `Dockerfile.postgis-test` and the CI `psql` step, and existing dev databases only pick it up after `docker compose down -v`.
+- All SQL lives in `src/fpts/sql/queries/`. Schema changes go in `src/fpts/sql/ddl/` and need a note in the PR (there is no migration tool yet). Both PostGIS Dockerfiles copy the whole `ddl/` directory into initdb, where they run in name order together with the image's own `10_postgis.sh` (so DDL should `CREATE EXTENSION IF NOT EXISTS` what it needs), so a new DDL file needs no other wiring, but existing dev databases only pick it up after `docker compose down -v`.
 - Domain models in `src/fpts/domain/` are frozen dataclasses (exceptions in `errors.py` are plain `Exception` subclasses, because frameworks set attributes such as `__traceback__` on them); API shapes are Pydantic models in `schemas.py`.
 - Configuration comes from `fpts.config.settings.Settings` (environment variables or `.env`). Add new settings there with a safe default.
 - Every behaviour change needs a test. Unit tests must not need Docker; anything that needs PostGIS goes in `tests/integration/` with the `integration` marker.
