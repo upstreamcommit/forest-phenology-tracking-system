@@ -1,7 +1,11 @@
 import { useId } from 'react'
 
-import type { GradientLegend, LegendData } from './colourScale'
+import { useElementWidth } from '../charts/useElementWidth'
+import { fitTicks, type GradientLegend, type LegendData } from './colourScale'
 import { METRICS, type MetricKey } from './metrics'
+
+/** Width of the bar in the desktop sidebar, used until the bar is measured. */
+const DEFAULT_BAR_WIDTH = 320
 
 interface LegendProps {
   metric: MetricKey
@@ -21,25 +25,31 @@ function Swatch({ colour }: { colour: string }) {
 }
 
 function GradientScale({ legend }: { legend: GradientLegend }) {
+  const [barRef, barWidth] = useElementWidth<HTMLDivElement>(DEFAULT_BAR_WIDTH)
   const gradient = legend.stops.map((s) => `${s.colour} ${s.offset * 100}%`).join(', ')
   const labels = legend.ticks.map((t) => t.label)
-  const last = legend.ticks.length - 1
+  // Only the labels that fit side by side are drawn; the sentence above names them all.
+  const ticks = fitTicks(legend.ticks, barWidth)
+  const last = ticks.length - 1
 
   return (
     <div>
       <p className="sr-only">
-        Colours run from dark purple for {labels[0]} through green to yellow for {labels[last]}.
-        Marked values: {labels.join(', ')}.
+        Colours run from dark purple for {labels[0]} through green to yellow for{' '}
+        {labels[labels.length - 1]}. Marked values: {labels.join(', ')}.
       </p>
       <div aria-hidden="true">
         <div
+          ref={barRef}
+          data-legend-bar
           className="h-3 rounded-sm ring-1 ring-inset ring-line"
           style={{ backgroundImage: `linear-gradient(to right, ${gradient})` }}
         />
         <div className="relative mt-1 h-4 text-xs text-ink-muted">
-          {legend.ticks.map((tick, i) => (
+          {ticks.map((tick, i) => (
             <span
               key={tick.value}
+              data-tick={tick.value}
               className={`absolute top-0 whitespace-nowrap tabular-nums ${
                 i === 0 ? '' : i === last ? '-translate-x-full' : '-translate-x-1/2'
               }`}
@@ -50,6 +60,7 @@ function GradientScale({ legend }: { legend: GradientLegend }) {
           ))}
         </div>
       </div>
+      <p className="mt-1.5 text-xs text-ink-subtle">The scale is the same for every year.</p>
     </div>
   )
 }
@@ -66,9 +77,6 @@ export function Legend({ metric, legend, showComputedArea }: LegendProps) {
       </h2>
 
       {legend.kind === 'gradient' && <GradientScale legend={legend} />}
-      {legend.kind === 'empty' && (
-        <p className="text-sm text-ink-muted">No cell has a value for this metric.</p>
-      )}
 
       {hasItems && (
         <ul className="flex flex-col gap-1 text-sm text-ink">

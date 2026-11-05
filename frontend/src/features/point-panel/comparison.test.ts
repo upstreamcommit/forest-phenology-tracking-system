@@ -29,6 +29,22 @@ describe('describeComparison', () => {
     ])
   })
 
+  it('keeps the three sentences consistent when the average has fractional days', () => {
+    // Rounded on its own, the length difference (209 - 208.636) would be 0 days while the end
+    // was a day later and the start on the average day.
+    const fractional: SeasonAverage = { ...average, sos: 87.818, eos: 296.455, length: 208.636 }
+    expect(describeComparison({ year: 2020, sos: 88, eos: 297, length: 209 }, fractional)).toEqual([
+      "Season 1 day longer than this point's 2016–2026 average",
+      'Started on the average day',
+      'Ended 1 day later than average',
+    ])
+    expect(describeComparison({ year: 2021, sos: 89, eos: 296, length: 207 }, fractional)).toEqual([
+      "Season 1 day shorter than this point's 2016–2026 average",
+      'Started 1 day later than average',
+      'Ended on the average day',
+    ])
+  })
+
   it('says when a season matches the average', () => {
     expect(describeComparison({ year: 2022, sos: 100, eos: 280, length: 180 }, average)).toEqual([
       "Season length matches this point's 2016–2026 average",

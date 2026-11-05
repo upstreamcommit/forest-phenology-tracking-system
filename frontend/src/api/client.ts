@@ -93,25 +93,38 @@ export function toApiError(status: number, body: unknown): ApiError {
   return new ApiError('http', status, `Request failed (${status}).`, body)
 }
 
+/** A cancelled request: callers (TanStack Query) expect it back as it is, not as an ApiError. */
+function isAbort(error: unknown, signal: AbortSignal | null | undefined): boolean {
+  return signal?.aborted === true || (isRecord(error) && error.name === 'AbortError')
+}
+
 export async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   let response: Response
+  let text: string
   try {
     response = await fetch(url, { ...init, headers: { Accept: 'application/json', ...init.headers } })
+    // Reading the body can fail too, if the connection drops partway.
+    text = await response.text()
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (isAbort(error, init.signal)) throw error
     throw new ApiError('network', 0, 'Could not reach the API. Is it running?', error)
   }
 
-  const text = await response.text()
   let body: unknown = text
+  let parsed = false
   if (text && (response.headers.get('content-type') ?? '').includes('json')) {
     try {
       body = JSON.parse(text)
+      parsed = true
     } catch {
       body = text
     }
   }
 
   if (!response.ok) throw toApiError(response.status, body)
+  // A success that isn't JSON (a proxy's HTML page, say) is not the data the caller asked for.
+  if (!parsed) {
+    throw new ApiError('http', response.status, 'Unexpected response from the API.', body)
+  }
   return body as T
 }

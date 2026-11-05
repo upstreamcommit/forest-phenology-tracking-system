@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
+import { describeError } from '../lib/errors'
 import { server } from '../test/server'
 import { ApiError, apiUrl, fetchJson, toApiError } from './client'
 
@@ -37,6 +38,15 @@ describe('toApiError', () => {
     expect(error).toMatchObject({ kind: 'out_of_coverage', message: 'Requested location is outside dataset coverage.' })
   })
 
+  it("reads the API's 400 detail as a validation error", () => {
+    const error = toApiError(400, { detail: 'Invalid parameters: end_year must be >= start_year' })
+    expect(error).toMatchObject({
+      kind: 'validation',
+      status: 400,
+      message: 'Invalid parameters: end_year must be >= start_year',
+    })
+  })
+
   it('treats a plain-text 500 as a server error', () => {
     expect(toApiError(500, 'Internal Server Error').kind).toBe('server')
   })
@@ -57,5 +67,57 @@ describe('fetchJson', () => {
     const error = await fetchJson('/catalog').catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ kind: 'network', status: 0 })
+  })
+
+  it('reports a connection that drops while the body is read as a network failure', async () => {
+    server.use(
+      http.get(
+        '*/catalog',
+        () =>
+          new HttpResponse(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"products": ['))
+                controller.error(new TypeError('terminated'))
+              },
+            }),
+            { headers: { 'Content-Type': 'application/json' } },
+          ),
+      ),
+    )
+    const error = await fetchJson('/catalog').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ kind: 'network', status: 0 })
+    expect(describeError(error)).toBe(
+      'The API could not be reached. Check that the backend is running.',
+    )
+  })
+
+  it('rejects a successful response that is not JSON', async () => {
+    server.use(http.get('*/catalog', () => HttpResponse.html('<!doctype html><p>Proxy page</p>')))
+    const error = await fetchJson('/catalog').catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({
+      kind: 'http',
+      status: 200,
+      message: 'Unexpected response from the API.',
+    })
+  })
+
+  it('rejects a successful JSON response that does not parse, or is empty', async () => {
+    const json = { headers: { 'Content-Type': 'application/json' } }
+    server.use(http.get('*/catalog', () => new HttpResponse('{"products": [', json)))
+    await expect(fetchJson('/catalog')).rejects.toMatchObject({ kind: 'http', status: 200 })
+
+    server.use(http.get('*/catalog', () => new HttpResponse(null, { status: 200 })))
+    await expect(fetchJson('/catalog')).rejects.toMatchObject({ kind: 'http', status: 200 })
+  })
+
+  it('passes a cancellation through as an AbortError, not an ApiError', async () => {
+    const error = await fetchJson('/catalog', { signal: AbortSignal.abort() }).catch(
+      (e: unknown) => e,
+    )
+    expect(error).not.toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ name: 'AbortError' })
   })
 })

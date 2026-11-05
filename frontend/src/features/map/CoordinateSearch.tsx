@@ -3,6 +3,7 @@ import { useId, useState, type FormEvent } from 'react'
 import type { BBox } from '../../api/types'
 import { Button } from '../../components/Button'
 import { formatCoordinates } from '../../lib/format'
+import { parseDegrees } from './coordinates'
 import { findNearestCell, type CellCollection, type CellProperties } from './gridLayer'
 
 interface CoordinateSearchProps {
@@ -10,13 +11,17 @@ interface CoordinateSearchProps {
   cells: CellCollection | undefined
   /** Extent of the stored points, quoted when a search misses the grid. */
   bbox: BBox | undefined
+  /** The selected point, so the search stops reporting its pick once another is selected. */
+  selected: { lat: number; lon: number } | null
   onSelect: (cell: CellProperties) => void
 }
 
-/** Accepts "51.5", " -0.5 " and a typographic minus; anything else is NaN. */
-function parseDegrees(text: string): number {
-  const cleaned = text.trim().replace(/−/g, '-')
-  return cleaned === '' ? NaN : Number(cleaned)
+interface Found {
+  lat: number
+  lon: number
+  message: string
+  /** The point has been selected; the message goes once it no longer is. */
+  selected: boolean
 }
 
 function describeExtent(bbox: BBox): string {
@@ -30,22 +35,31 @@ function describeExtent(bbox: BBox): string {
  * Selects the stored grid cell nearest to typed coordinates: the keyboard route to a cell, since
  * the map itself is not keyboard friendly for picking.
  */
-export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProps) {
+export function CoordinateSearch({ cells, bbox, selected, onSelect }: CoordinateSearchProps) {
   const ids = { heading: useId(), lat: useId(), lon: useId(), hint: useId(), error: useId() }
   const [lat, setLat] = useState('')
   const [lon, setLon] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [found, setFound] = useState<string | null>(null)
+  const [found, setFound] = useState<Found | null>(null)
+  // The message reports the selection the search made: shown once that point is selected, and
+  // dropped for good when another point is selected or the selection closes.
+  const isSelected = found !== null && found.lat === selected?.lat && found.lon === selected.lon
+  if (found && isSelected && !found.selected) setFound({ ...found, selected: true })
+  if (found?.selected && !isSelected) setFound(null)
+  const foundMessage = isSelected ? found.message : null
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!cells) return
     setFound(null)
 
-    const latValue = parseDegrees(lat)
-    const lonValue = parseDegrees(lon)
+    const latValue = parseDegrees(lat, 'lat')
+    const lonValue = parseDegrees(lon, 'lon')
     if (!Number.isFinite(latValue) || !Number.isFinite(lonValue)) {
-      setError('Enter both latitude and longitude as decimal degrees, for example 51.5 and -0.5.')
+      setError(
+        'Enter both latitude and longitude as decimal degrees, for example 51.5 and -0.5 ' +
+          '(or 0.5 W).',
+      )
       return
     }
     if (Math.abs(latValue) > 90 || Math.abs(lonValue) > 180) {
@@ -63,13 +77,18 @@ export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProp
     }
     setError(null)
     const { lat: cellLat, lon: cellLon } = cell.properties
-    setFound(`Selected the nearest stored point, ${formatCoordinates(cellLat, cellLon)}.`)
+    setFound({
+      lat: cellLat,
+      lon: cellLon,
+      message: `Selected the nearest stored point, ${formatCoordinates(cellLat, cellLon)}.`,
+      selected: false,
+    })
     onSelect(cell.properties)
   }
 
   const describedBy = error ? `${ids.hint} ${ids.error}` : ids.hint
   const inputClass =
-    'w-full rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-ink tabular-nums placeholder:text-ink-subtle aria-invalid:border-danger'
+    'w-full rounded-md border border-ink-subtle bg-surface px-2 py-1.5 text-sm text-ink tabular-nums placeholder:text-ink-subtle aria-invalid:border-danger'
 
   return (
     <div className="flex flex-col gap-2">
@@ -78,7 +97,7 @@ export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProp
       </h2>
       <form role="search" aria-labelledby={ids.heading} noValidate onSubmit={onSubmit}>
         <p id={ids.hint} className="mb-2 text-xs text-ink-subtle">
-          Decimal degrees. South and west are negative.
+          Decimal degrees. South and west are negative, or add S or W.
         </p>
         <div className="flex items-end gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -88,7 +107,6 @@ export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProp
             <input
               id={ids.lat}
               type="text"
-              inputMode="decimal"
               autoComplete="off"
               spellCheck={false}
               placeholder="51.5"
@@ -109,7 +127,6 @@ export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProp
             <input
               id={ids.lon}
               type="text"
-              inputMode="decimal"
               autoComplete="off"
               spellCheck={false}
               placeholder="-0.5"
@@ -134,7 +151,7 @@ export function CoordinateSearch({ cells, bbox, onSelect }: CoordinateSearchProp
         )}
         {/* Always rendered: a live region must exist before its text changes to be announced. */}
         <p role="status" className="text-sm text-ink-muted [&:not(:empty)]:mt-2">
-          {found}
+          {foundMessage}
         </p>
       </form>
     </div>

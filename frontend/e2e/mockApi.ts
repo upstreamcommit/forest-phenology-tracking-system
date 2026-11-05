@@ -17,9 +17,18 @@ function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 }
 
-/** Answers the app's API calls from the shared test fixtures, like MSW does in unit tests. */
+/** The API paths the app calls. One pattern, so a later mockApi call can remove the earlier one. */
+const API_ROUTES = /\/(health|catalog|phenology\/[a-z/]+)(\?|$)/
+
+/**
+ * Answers the app's API calls from the shared test fixtures, like MSW does in unit tests.
+ * Calling it again replaces the earlier mock, so a test can switch to `apiDown` after a
+ * beforeEach set up the happy path.
+ */
 export async function mockApi(page: Page, options: MockOptions = {}) {
-  await page.route(/\/(health|catalog|phenology\/[a-z/]+)(\?|$)/, (route) => {
+  // page.unroute matches by pattern equality, so this removes exactly the earlier mockApi routes.
+  await page.unroute(API_ROUTES)
+  await page.route(API_ROUTES, (route) => {
     if (options.apiDown) return route.abort('connectionrefused')
 
     const url = new URL(route.request().url())

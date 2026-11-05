@@ -46,7 +46,7 @@ Frontend
 - Forest Phenology Explorer: React 19, React Router, TanStack Query, MapLibre GL with
   OpenFreeMap basemaps, Tailwind CSS (light and dark themes). See `frontend/README.md`.
 - Tests: Vitest, Testing Library and MSW; Playwright with axe for end-to-end and accessibility.
-- Prerequisites: Node.js 22.22.2+ or 24.15+ (the `engines` range in `frontend/package.json`),
+- Prerequisites: Node.js 22.22.2+, 24.15+ or 26+ (the `engines` range in `frontend/package.json`),
   npm >= 10.
 
 ------------------------------------------------------------------------
@@ -239,7 +239,7 @@ Prerequisites
 - Poetry 2 (CI and the Docker image use 2.5.1).
 - (Optional) Git & GitHub for version control.
 - Docker
-- Node.js 22.22.2+ or 24.15+
+- Node.js 22.22.2+, 24.15+ or 26+
 - npm >= 10
 
 ------------------------------------------------------------------------

@@ -13,7 +13,8 @@ end-to-end and accessibility checks.
 
 ## Run it
 
-Node `^22.22.2 || >=24.15.0` (see `engines` in `package.json`).
+Node `^22.22.2 || ^24.15.0 || >=26.0.0` (see `engines` in `package.json`; Node 25 is left out
+because some test tools do not support it).
 
 ```bash
 npm ci
@@ -28,12 +29,15 @@ The app calls the API on its own origin, so the API needs no CORS.
 | Task | Command |
 |---|---|
 | Unit and component tests | `npm test` (`npm run test:watch` while developing) |
-| End-to-end and accessibility tests | `npm run e2e` (first time: `npx playwright install chromium`) |
+| End-to-end and accessibility tests | `npm run e2e` (first time: `npx playwright install chromium`; `E2E_PORT=4180 npm run e2e` to use another port) |
 | Lint | `npm run lint` |
 | Type-check and build | `npm run build` |
 
-The end-to-end tests build the app with `VITE_BASEMAP=none` (no map tiles) and mock the API
-with the fixtures in `src/test/fixtures.ts`, so they need neither the backend nor the network.
+The end-to-end tests build the app with `VITE_BASEMAP=none` (no map tiles) into `dist-e2e/`, so
+they never replace a real build in `dist/`, serve it on port 4174 (not `vite preview`'s 4173) and
+mock the API with the fixtures in `src/test/fixtures.ts` (through `e2e/mockApi.ts`), so they need
+neither the backend nor the network. Unit tests run in the `America/Los_Angeles` time zone and the
+end-to-end browser does too, so a date that slips a day west of Greenwich fails them.
 
 ## Layout
 
@@ -45,7 +49,8 @@ with the fixtures in `src/test/fixtures.ts`, so they need neither the backend no
 - `src/components/`: small shared UI primitives.
 - `src/features/`: `map/` (map explorer), `point-panel/` (selected point), `charts/`
   (hand-built SVG charts), `about/` (data and methods).
-- `src/lib/`: dates (UTC-safe), formatting, theme, error wording.
+- `src/lib/`: dates (UTC-safe), formatting, theme, error wording, and `useDraft` (a controlled
+  value that follows its prop but shows edits at once, for inputs driven by the URL).
 - `src/styles/index.css`: design tokens. Components use token classes such as `bg-surface` or
   `text-ink-muted`, never raw colours, so both themes stay in step.
 - `src/test/`: test setup, MSW handlers and fixtures. `e2e/`: Playwright tests.
@@ -54,9 +59,13 @@ with the fixtures in `src/test/fixtures.ts`, so they need neither the backend no
 
 `src/api/schema.gen.ts` is generated from the API's OpenAPI document. After API changes,
 regenerate it from the repository root (`openapi-typescript` 7 needs TypeScript 5, so it runs
-in a throwaway `npx` environment rather than as a project dependency):
+in a throwaway `npx` environment rather than as a project dependency). The API also reads `.env`
+from the current directory, and its settings decide whether `/metrics` and the debug routes exist,
+so the command sets them explicitly (environment variables win over `.env`) to match the
+committed file:
 
 ```bash
+ENVIRONMENT=development ENABLE_METRICS=false ENABLE_DEBUG_ROUTES=false \
 PHENOLOGY_REPO_BACKEND=memory poetry run python -c "import json; from fpts.api.main import create_app; print(json.dumps(create_app().openapi(), indent=1, sort_keys=True))" > /tmp/openapi.json
 npx -y -p openapi-typescript@7.13.0 -p typescript@5.9.3 openapi-typescript /tmp/openapi.json -o frontend/src/api/schema.gen.ts
 ```

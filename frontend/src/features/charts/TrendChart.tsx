@@ -1,11 +1,27 @@
-import { useId, useMemo, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import {
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+  type Ref,
+} from 'react'
 
 import type { YearMetric } from '../../api/types'
 import { Button } from '../../components/Button'
 import { dateFromDayOfYear, formatDate, formatDayMonth } from '../../lib/dates'
 import { formatDays } from '../../lib/format'
 import { linearScale, MONTH_LABELS, monthTicks } from './scales'
-import { averageSeason, seasonDays, yearRange, type SeasonDays } from './seasons'
+import {
+  averageSeason,
+  REFERENCE_YEAR,
+  seasonDays,
+  wholeDayAverage,
+  yearRange,
+  type SeasonDays,
+} from './seasons'
 import { useElementWidth } from './useElementWidth'
 
 export interface TrendChartProps {
@@ -59,6 +75,7 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
   const [hoverYear, setHoverYear] = useState<number | null>(null)
   const [focusYear, setFocusYear] = useState<number | null>(null)
   const [tableOpen, setTableOpen] = useState(false)
+  const tooltipRef = useRef<HTMLDivElement>(null)
   const captionId = useId()
   const tableId = useId()
 
@@ -74,6 +91,7 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
   )
   const average = useMemo(() => averageSeason(metrics), [metrics])
   const showAverage = average !== null && average.count > 1
+  const usual = average && wholeDayAverage(average)
 
   // Geometry: one slot per year across, day of year up the page (later dates higher).
   const plotLeft = MARGIN.left
@@ -94,9 +112,9 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
       : EMPTY_DOMAIN
   const y = linearScale(domain, [plotBottom, plotTop])
 
-  // Month positions shift by a day in leap years; one reference year keeps the axis steady.
-  const refYear = highlightYear ?? rows.at(-1)?.metric.year ?? 2001
-  const ticks = monthTicks(refYear)
+  // Month positions shift by a day in leap years. A fixed non-leap year keeps the axis (and the
+  // average's dates) the same whichever year is highlighted.
+  const ticks = monthTicks(REFERENCE_YEAR)
     .map((doy, month) => ({ doy, label: MONTH_LABELS[month] }))
     .filter((tick) => tick.doy >= domain[0] && tick.doy <= domain[1])
   const monthLabelEvery = Math.abs(y(31) - y(0)) < 14 ? 2 : 1
@@ -254,7 +272,12 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
             'aria-current': year === highlightYear ? ('true' as const) : undefined,
             style: { left: xCenter(index) - slot / 2, top: 0, width: slot, height: HEIGHT },
             onMouseEnter: () => setHoverYear(year),
-            onMouseLeave: () => setHoverYear((current) => (current === year ? null : current)),
+            onMouseLeave: (event: MouseEvent) => {
+              // Moving onto the tooltip keeps it open, so it can be hovered (WCAG 1.4.13).
+              const to = event.relatedTarget
+              if (to instanceof Node && tooltipRef.current?.contains(to)) return
+              setHoverYear((current) => (current === year ? null : current))
+            },
             onFocus: () => setFocusYear(year),
             onBlur: () => setFocusYear((current) => (current === year ? null : current)),
             onKeyDown: hideTooltip,
@@ -274,7 +297,9 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
 
         {activeRow && (
           <Tooltip
+            ref={tooltipRef}
             row={activeRow}
+            onMouseLeave={() => setHoverYear(null)}
             style={tooltipPosition({
               cx: xCenter(activeIndex),
               barWidth,
@@ -380,19 +405,19 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
               )
             })}
           </tbody>
-          {average && (
+          {usual && (
             <tfoot className="text-ink-muted">
               <tr className="border-t border-line-strong">
                 <th scope="row" className="py-1 pr-3 font-medium">
                   Average
                 </th>
                 <td className="py-1 pr-3">
-                  {formatDayMonth(dateFromDayOfYear(refYear, Math.round(average.sos)))}
+                  {formatDayMonth(dateFromDayOfYear(REFERENCE_YEAR, usual.sos))}
                 </td>
                 <td className="py-1 pr-3">
-                  {formatDayMonth(dateFromDayOfYear(refYear, Math.round(average.eos)))}
+                  {formatDayMonth(dateFromDayOfYear(REFERENCE_YEAR, usual.eos))}
                 </td>
-                <td className="py-1">{formatDays(Math.round(average.length))}</td>
+                <td className="py-1">{formatDays(usual.length)}</td>
               </tr>
             </tfoot>
           )}
@@ -419,13 +444,25 @@ function tooltipPosition({
   return cx > width / 2 ? { right: width - cx + gap, top } : { left: cx + gap, top }
 }
 
-function Tooltip({ row, style }: { row: Row; style: CSSProperties }) {
+function Tooltip({
+  ref,
+  row,
+  style,
+  onMouseLeave,
+}: {
+  ref: Ref<HTMLDivElement>
+  row: Row
+  style: CSSProperties
+  onMouseLeave: () => void
+}) {
   const { metric } = row
   return (
     <div
+      ref={ref}
       role="tooltip"
       style={style}
-      className="pointer-events-none absolute z-10 w-max -translate-y-1/2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-panel"
+      onMouseLeave={onMouseLeave}
+      className="absolute z-10 w-max -translate-y-1/2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-panel"
     >
       <p className="font-semibold text-ink">{metric.year}</p>
       {!metric.sos_date && !metric.eos_date ? (

@@ -13,6 +13,7 @@ export const COMPUTED_SOURCE = 'fpts-computed-area'
 export const LAYER_IDS = {
   fill: 'fpts-cell-fill',
   hover: 'fpts-cell-hover',
+  computedHalo: 'fpts-computed-outline-halo',
   computed: 'fpts-computed-outline',
   selectedHalo: 'fpts-cell-selected-halo',
   selected: 'fpts-cell-selected',
@@ -20,8 +21,8 @@ export const LAYER_IDS = {
 
 /**
  * Outline colours. `line` matches the ink token of each theme, so the legend's dashed swatch
- * (drawn with border-ink) matches the computed-area outline; `halo` keeps the selected outline
- * visible over any fill colour.
+ * (drawn with border-ink) matches the computed-area outline; `halo`, drawn under the computed-area
+ * and selected outlines, keeps them visible over any fill colour.
  */
 export const OVERLAY_COLOURS: Record<ResolvedTheme, { line: string; halo: string }> = {
   light: { line: '#1c2620', halo: '#ffffff' },
@@ -94,6 +95,12 @@ export function outlineLayers(selectedId: number | null, theme: ResolvedTheme) {
   const { line, halo } = OVERLAY_COLOURS[theme]
   const layers: LayerSpecification[] = [
     {
+      id: LAYER_IDS.computedHalo,
+      type: 'line',
+      source: COMPUTED_SOURCE,
+      paint: { 'line-color': halo, 'line-width': 4 },
+    },
+    {
       id: LAYER_IDS.computed,
       type: 'line',
       source: COMPUTED_SOURCE,
@@ -115,6 +122,17 @@ export function outlineLayers(selectedId: number | null, theme: ResolvedTheme) {
     },
   ]
   return layers
+}
+
+/**
+ * Paint for the basemap's labels in the dark theme, which draws them in dim colours that get lost
+ * over the cells: light text on a dark halo. Null in the light theme, whose labels already read
+ * well.
+ */
+export function labelPaint(theme: ResolvedTheme) {
+  if (theme === 'light') return null
+  const { line, halo } = OVERLAY_COLOURS.dark
+  return { textColor: line, haloColor: halo, haloWidth: 1.5 }
 }
 
 /**

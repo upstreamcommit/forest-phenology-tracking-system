@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router'
 
 import { useCatalog, useGrid } from '../../api/queries'
-import type { Product, StoredCoverage } from '../../api/types'
+import type { GridResponse, Product, StoredCoverage } from '../../api/types'
 import { Badge } from '../../components/Badge'
 import { Button } from '../../components/Button'
+import { PageTitle } from '../../components/PageTitle'
 import { Spinner } from '../../components/Spinner'
 import { StatusMessage } from '../../components/StatusMessage'
 import { describeError } from '../../lib/errors'
@@ -28,12 +29,28 @@ import { PhenologyMap } from './PhenologyMap'
 import { parseCoordinate, parseMetric, parseYear } from './urlState'
 import { YearSlider } from './YearSlider'
 
+/** Tailwind's lg breakpoint: from here the controls and the point panel sit beside the map. */
+const SIDE_BY_SIDE = '(min-width: 64rem)'
+
+function matches(query: string): boolean {
+  return window.matchMedia?.(query).matches ?? false
+}
+
 function PageMessage({ children }: { children: ReactNode }) {
   return <div className="mx-auto w-full max-w-xl px-4 py-12">{children}</div>
 }
 
 /** The map page: picks the product with stored metrics, then hands over to the explorer. */
 export function MapExplorerPage() {
+  return (
+    <>
+      <PageTitle>Phenology map</PageTitle>
+      <CatalogGate />
+    </>
+  )
+}
+
+function CatalogGate() {
   const catalog = useCatalog()
 
   if (catalog.isPending) {
@@ -72,6 +89,9 @@ export function MapExplorerPage() {
 
 type ParamChanges = Record<string, string | null>
 
+/** Where a selection came from: the map moves focus to the panel, the search keeps it. */
+type SelectionSource = 'map' | 'search'
+
 function Explorer({ product, stored }: { product: Product; stored: StoredCoverage }) {
   const [params, setParams] = useSearchParams()
   const theme = useResolvedTheme()
@@ -83,14 +103,28 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
   const lon = parseCoordinate(params.get('lon'))
 
   const grid = useGrid(product.id, year)
+  // A failed fetch leaves no data, so the last grid that loaded stays on the map (and keeps the
+  // selection) under the error message.
+  const [lastGrid, setLastGrid] = useState<GridResponse | undefined>(grid.data)
+  if (grid.data && grid.data !== lastGrid) setLastGrid(grid.data)
+  const shownGrid = grid.data ?? lastGrid
   const cells = useMemo(
-    () => (grid.data ? buildCells(grid.data, resolveGridStep(stored, grid.data)) : undefined),
-    [grid.data, stored],
+    () => (shownGrid ? buildCells(shownGrid, resolveGridStep(stored, shownGrid)) : undefined),
+    [shownGrid, stored],
   )
+  const shownYear = shownGrid?.year ?? year
+
+  // The failure to load this year's grid. Retrying puts the query back to pending, so this keeps
+  // the message (and its focused Try again button) up until the grid arrives or the year changes.
+  const [failure, setFailure] = useState<{ year: number; error: unknown } | null>(null)
+  if (grid.isError && (!failure || failure.error !== grid.error || failure.year !== year)) {
+    setFailure({ year, error: grid.error })
+  } else if (failure && (failure.year !== year || (grid.isSuccess && !grid.isPlaceholderData))) {
+    setFailure(null)
+  }
+  const retrying = failure !== null && grid.isFetching
   // While a new year loads, the previous year stays on the map with a small note on top.
-  const shownYear = grid.data?.year ?? year
-  const loadingYear =
-    !grid.isPending && grid.isFetching && (grid.isPlaceholderData || !grid.data) ? year : null
+  const loadingYear = failure === null && grid.isPlaceholderData && grid.isFetching ? year : null
 
   // Only an exact stored point of the grid on screen counts as a selection.
   const selectedCell = cells && lat !== null && lon !== null ? findCellAt(cells, lat, lon) : null
@@ -100,11 +134,10 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
     () =>
       buildColourScale({
         metric,
-        values: (cells ?? EMPTY_CELLS).features.map((f) => f.properties[metric]),
+        values: cells?.features.map((f) => f.properties[metric]),
         theme,
-        year: shownYear,
       }),
-    [cells, metric, theme, shownYear],
+    [cells, metric, theme],
   )
 
   const update = useCallback(
@@ -125,11 +158,40 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
   )
   const setYear = useCallback((next: number) => update({ year: String(next) }, true), [update])
   const setMetric = useCallback((next: MetricKey) => update({ metric: next }, true), [update])
+
+  // Below lg the point panel sits under the controls, out of sight of the map, so a selection
+  // scrolls it into view; one made on the map also moves focus there.
+  const panelRef = useRef<HTMLDivElement>(null)
+  const pendingReveal = useRef<SelectionSource | null>(null)
+  const revealPanel = useCallback((source: SelectionSource) => {
+    const panel = panelRef.current
+    if (!panel) return
+    if (source === 'map') panel.focus({ preventScroll: true })
+    const smooth = !matches('(prefers-reduced-motion: reduce)')
+    panel.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' })
+  }, [])
+  useEffect(() => {
+    const source = pendingReveal.current
+    if (selected === null || source === null) return
+    pendingReveal.current = null
+    revealPanel(source)
+  }, [selected, revealPanel])
+
   // String(number) round-trips a double exactly, so the API gets the stored value back.
-  const selectCell = useCallback(
-    (cell: CellProperties) => update({ lat: String(cell.lat), lon: String(cell.lon) }, false),
-    [update],
+  const select = useCallback(
+    (cell: CellProperties, source: SelectionSource) => {
+      const nextLat = String(cell.lat)
+      const nextLon = String(cell.lon)
+      const unchanged = params.get('lat') === nextLat && params.get('lon') === nextLon
+      if (!unchanged) update({ lat: nextLat, lon: nextLon }, false)
+      if (matches(SIDE_BY_SIDE)) return
+      if (unchanged) revealPanel(source)
+      else pendingReveal.current = source
+    },
+    [params, update, revealPanel],
   )
+  const selectOnMap = useCallback((cell: CellProperties) => select(cell, 'map'), [select])
+  const selectBySearch = useCallback((cell: CellProperties) => select(cell, 'search'), [select])
 
   // Closing the panel removes the focused button, so put focus somewhere predictable.
   const hintRef = useRef<HTMLParagraphElement>(null)
@@ -146,60 +208,27 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
   }, [selected])
 
   const metricLabel = METRICS[metric].label
-  const description = cells
+  const stillShown = cells && shownYear !== year ? `, so the map still shows ${shownYear}` : ''
+  const failureNote = failure ? `The grid for ${year} could not be loaded${stillShown}.` : null
+  const contents = cells
     ? `${cells.features.length} grid cells for ${shownYear}, ` +
       `coloured by ${metricLabel.toLowerCase()}. ` +
       (selected
         ? `Selected point: ${formatCoordinates(selected.lat, selected.lon)}. `
         : 'No point is selected. ') +
       'To select a cell with the keyboard, use the Find a point form.'
-    : 'The grid is loading.'
+    : failureNote
+      ? null
+      : 'The grid is loading.'
+  const description = [failureNote, contents].filter(Boolean).join(' ')
 
   const step = stored.grid_step_deg
 
+  // The map comes first in the document, so below lg it is first on screen and in the Tab
+  // order; from lg up it moves to the right of the controls, which then scroll on their own.
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-      <div className="flex flex-col gap-5 border-t border-line bg-surface p-4 lg:w-[22rem] lg:shrink-0 lg:overflow-y-auto lg:border-t-0 lg:border-r">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-lg font-semibold text-ink">Phenology map</h1>
-            {product.synthetic && <Badge tone="warn">Synthetic</Badge>}
-          </div>
-          <p className="mt-1 text-sm text-ink-muted">
-            Stored season metrics from {product.label}
-            {step ? ` on a ${step}° grid` : ''}. Select a cell on the map, or find one by its
-            coordinates.
-          </p>
-        </div>
-
-        <MetricPicker value={metric} onChange={setMetric} />
-        <YearSlider years={years} value={year} onChange={setYear} />
-        <Legend metric={metric} legend={scale.legend} showComputedArea={!!product.computed} />
-        <CoordinateSearch cells={cells} bbox={stored.bbox} onSelect={selectCell} />
-
-        {selected ? (
-          <PointPanel
-            product={product.id}
-            year={year}
-            years={years}
-            lat={selected.lat}
-            lon={selected.lon}
-            inComputedArea={isInBBox(selected.lat, selected.lon, product.computed?.bbox)}
-            onClose={clearSelection}
-            onSelectYear={setYear}
-          />
-        ) : (
-          <p
-            ref={hintRef}
-            tabIndex={-1}
-            className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-muted"
-          >
-            No point selected. Select a cell to see its season and how it changes over the years.
-          </p>
-        )}
-      </div>
-
-      <div className="relative order-first h-[55vh] shrink-0 lg:order-none lg:h-auto lg:min-h-0 lg:flex-1">
+    <div className="relative flex flex-1 flex-col lg:min-h-0 lg:flex-row lg:overflow-hidden">
+      <div className="relative h-[55vh] shrink-0 lg:order-last lg:h-auto lg:min-h-0 lg:flex-1">
         <PhenologyMap
           cells={cells ?? EMPTY_CELLS}
           fillColor={scale.fillColor}
@@ -207,11 +236,11 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
           computedBBox={product.computed?.bbox}
           initialBBox={stored.bbox}
           theme={theme}
-          onSelect={selectCell}
+          onSelect={selectOnMap}
           label={`Map of ${metricLabel.toLowerCase()} in ${shownYear}`}
           description={description}
         />
-        {grid.isPending && (
+        {grid.isPending && failure === null && (
           <div className="absolute inset-x-3 top-3 mx-auto max-w-md shadow-panel">
             <StatusMessage tone="loading" title={`Loading the grid for ${year}`} />
           </div>
@@ -224,16 +253,76 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
             <Spinner label={`Loading ${loadingYear}`} />
           </div>
         )}
-        {grid.isError && !grid.isFetching && (
+        {failure && (
           <div className="absolute inset-x-3 top-3 mx-auto max-w-md shadow-panel">
             <StatusMessage
               tone="error"
               title={`Could not load the grid for ${year}`}
-              action={<Button onClick={() => void grid.refetch()}>Try again</Button>}
+              action={
+                <Button
+                  aria-disabled={retrying}
+                  className="aria-disabled:cursor-progress aria-disabled:opacity-70"
+                  onClick={() => {
+                    if (!retrying) void grid.refetch()
+                  }}
+                >
+                  {retrying ? 'Trying again…' : 'Try again'}
+                </Button>
+              }
             >
-              {describeError(grid.error)}
+              {describeError(failure.error)}
+              {cells && shownYear !== year && ` The map still shows ${shownYear}.`}
             </StatusMessage>
           </div>
+        )}
+      </div>
+
+      <div className="relative flex flex-col gap-5 border-t border-line bg-surface p-4 lg:w-[22rem] lg:shrink-0 lg:overflow-y-auto lg:border-t-0 lg:border-r">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 tabIndex={-1} className="text-lg font-semibold text-ink outline-none">
+              Phenology map
+            </h1>
+            {product.synthetic && <Badge tone="warn">Synthetic</Badge>}
+          </div>
+          <p className="mt-1 text-sm text-ink-muted">
+            Stored season metrics from {product.label}
+            {step ? ` on a ${step}° grid` : ''}. Select a cell on the map, or find one by its
+            coordinates.
+          </p>
+        </div>
+
+        <MetricPicker value={metric} onChange={setMetric} />
+        <YearSlider years={years} value={year} onChange={setYear} />
+        <Legend metric={metric} legend={scale.legend} showComputedArea={!!product.computed} />
+        <CoordinateSearch
+          cells={cells}
+          bbox={stored.bbox}
+          selected={selected}
+          onSelect={selectBySearch}
+        />
+
+        {selected ? (
+          <div ref={panelRef} tabIndex={-1} className="scroll-mt-2 outline-none">
+            <PointPanel
+              product={product.id}
+              year={year}
+              years={years}
+              lat={selected.lat}
+              lon={selected.lon}
+              inComputedArea={isInBBox(selected.lat, selected.lon, product.computed?.bbox)}
+              onClose={clearSelection}
+              onSelectYear={setYear}
+            />
+          </div>
+        ) : (
+          <p
+            ref={hintRef}
+            tabIndex={-1}
+            className="rounded-lg border border-dashed border-line p-4 text-sm text-ink-muted"
+          >
+            No point selected. Select a cell to see its season and how it changes over the years.
+          </p>
         )}
       </div>
     </div>

@@ -1,27 +1,35 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { gridFor } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/render'
 import { server } from '../../test/server'
 import type { PointPanelProps } from '../point-panel/PointPanel'
+import { NO_DATA_COLOUR } from './colourScale'
 import { MapExplorerPage } from './MapExplorerPage'
 import type { PhenologyMapProps } from './PhenologyMap'
 
+/** The props the page last handed to the map. */
+const shownMap = vi.hoisted(() => ({ props: null as PhenologyMapProps | null }))
+
 // jsdom has no WebGL: stand in for the map with one button per cell.
 vi.mock('./PhenologyMap', () => ({
-  PhenologyMap: ({ cells, onSelect, label, selected }: PhenologyMapProps) => (
-    <div role="group" aria-label={label}>
-      {selected && <p>Map selection {`${selected.lat}, ${selected.lon}`}</p>}
-      {cells.features.map((feature) => (
-        <button key={feature.id} type="button" onClick={() => onSelect(feature.properties)}>
-          {`Cell ${feature.properties.lat}, ${feature.properties.lon}`}
-        </button>
-      ))}
-    </div>
-  ),
+  PhenologyMap: (props: PhenologyMapProps) => {
+    shownMap.props = props
+    const { cells, onSelect, label, selected } = props
+    return (
+      <div role="group" aria-label={label}>
+        {selected && <p>Map selection {`${selected.lat}, ${selected.lon}`}</p>}
+        {cells.features.map((feature) => (
+          <button key={feature.id} type="button" onClick={() => onSelect(feature.properties)}>
+            {`Cell ${feature.properties.lat}, ${feature.properties.lon}`}
+          </button>
+        ))}
+      </div>
+    )
+  },
 }))
 
 // The point panel is built and tested separately.
@@ -66,6 +74,25 @@ async function waitForMap(name: string) {
   await within(map).findAllByRole('button')
   return map
 }
+
+/** Makes the given media queries match (the default jsdom stub matches none). */
+function matchMedia(...matching: string[]) {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) => ({ matches: matching.includes(query), media: query }) as MediaQueryList,
+  )
+}
+
+/** The fallback colour of the map's fill expression: the theme's no-data grey. */
+function noDataColourOnMap() {
+  return shownMap.props?.fillColor.at(-1)
+}
+
+// jsdom does not implement scrolling.
+const scrollIntoView = vi.fn()
+beforeEach(() => {
+  shownMap.props = null
+  Element.prototype.scrollIntoView = scrollIntoView
+})
 
 describe('MapExplorerPage', () => {
   it('shows the latest stored year coloured by season length by default', async () => {
@@ -242,6 +269,7 @@ describe('MapExplorerPage', () => {
     expect(alert).toHaveTextContent('Could not load the grid for 2026')
     expect(alert).toHaveTextContent('The API had an internal problem. Try again in a moment.')
     expect(within(alert).getByRole('button', { name: 'Try again' })).toBeEnabled()
+    expect(shownMap.props?.description).toBe('The grid for 2026 could not be loaded.')
   })
 
   it('shows an error when the catalog cannot be loaded', async () => {
@@ -262,5 +290,166 @@ describe('MapExplorerPage', () => {
 
     expect(await screen.findByText('No stored metrics to map')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('group')).not.toBeInTheDocument())
+  })
+  it('sets the page title', async () => {
+    renderPage()
+    await waitFor(() => expect(document.title).toBe('Phenology map · Forest Phenology Explorer'))
+  })
+
+  it('colours a value the same in every year', async () => {
+    const { user } = renderPage()
+    await waitForMap('Map of season length in 2026')
+    const fill2026 = shownMap.props?.fillColor
+
+    await user.click(screen.getByRole('button', { name: 'Previous year' }))
+    await waitForMap('Map of season length in 2025')
+
+    expect(shownMap.props?.fillColor).toEqual(fill2026)
+    expect(screen.getByText('The scale is the same for every year.')).toBeVisible()
+  })
+
+  it('keeps the last grid, the selection and the panel when a new year fails to load', async () => {
+    let failures = 1
+    server.use(
+      http.get('*/phenology/grid', async ({ request }) => {
+        const year = Number(new URL(request.url).searchParams.get('year'))
+        if (year !== 2025) return HttpResponse.json(gridFor(year))
+        if (failures > 0) {
+          failures -= 1
+          return HttpResponse.text('Internal Server Error', { status: 500 })
+        }
+        await delay(50)
+        return HttpResponse.json(gridFor(year))
+      }),
+    )
+    const { user, search } = renderPage('/?lat=51.5&lon=-0.5')
+    await waitForMap('Map of season length in 2026')
+
+    await user.click(screen.getByRole('button', { name: 'Previous year' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Could not load the grid for 2025')
+    expect(alert).toHaveTextContent('The map still shows 2026.')
+    const map = screen.getByRole('group', { name: 'Map of season length in 2026' })
+    expect(within(map).getAllByRole('button', { name: /^Cell/ })).toHaveLength(121)
+    expect(within(map).getByText('Map selection 51.5, -0.5')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Selected point' })).toHaveTextContent(
+      'Point 51.5, -0.5 in 2025',
+    )
+    expect(search().get('lat')).toBe('51.5')
+    expect(shownMap.props?.description).toMatch(
+      /^The grid for 2025 could not be loaded, so the map still shows 2026\. 121 grid cells/,
+    )
+    const legend = screen.getByRole('region', { name: 'Legend: Season length' })
+    expect(legend).toHaveTextContent('≤ 120 days')
+
+    // Retrying keeps the message (and the focused button) up until the grid arrives.
+    const retry = within(alert).getByRole('button', { name: 'Try again' })
+    await user.click(retry)
+    expect(retry).toHaveFocus()
+    expect(retry).toHaveAccessibleName('Trying again…')
+    expect(retry).toHaveAttribute('aria-disabled', 'true')
+    expect(alert).toBeInTheDocument()
+
+    await waitForMap('Map of season length in 2025')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Selected point' })).toBeInTheDocument()
+  })
+
+  it('shows the colour scale, not a claim about missing values, while the grid loads', async () => {
+    server.use(
+      http.get('*/phenology/grid', async ({ request }) => {
+        await delay(50)
+        return HttpResponse.json(gridFor(Number(new URL(request.url).searchParams.get('year'))))
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('Loading the grid for 2026…')).toBeInTheDocument()
+
+    const legend = screen.getByRole('region', { name: 'Legend: Season length' })
+    expect(legend).toHaveTextContent('≤ 120 days')
+    expect(legend).not.toHaveTextContent('No data')
+    expect(legend).not.toHaveTextContent(/no value/i)
+    expect(shownMap.props?.description).toBe('The grid is loading.')
+  })
+
+  it('adds no history entry when the selected cell is selected again', async () => {
+    const { user, search, router } = renderPage()
+    await waitForMap('Map of season length in 2026')
+
+    await user.click(screen.getByRole('button', { name: 'Cell 51.5, -0.5' }))
+    await screen.findByRole('region', { name: 'Selected point' })
+    await user.click(screen.getByRole('button', { name: 'Cell 51.5, -0.5' }))
+    const form = screen.getByRole('search', { name: 'Find a point' })
+    await user.type(within(form).getByLabelText('Latitude'), '51.5')
+    await user.type(within(form).getByLabelText('Longitude'), '-0.5')
+    await user.click(within(form).getByRole('button', { name: 'Find cell' }))
+    expect(search().get('lat')).toBe('51.5')
+
+    // One Back undoes the selection.
+    await act(() => router.navigate(-1))
+    expect(search().has('lat')).toBe(false)
+  })
+
+  it('below lg, scrolls the panel into view and focuses it after a selection on the map', async () => {
+    const { user } = renderPage()
+    await waitForMap('Map of season length in 2026')
+
+    await user.click(screen.getByRole('button', { name: 'Cell 51.5, -0.5' }))
+
+    const panel = await screen.findByRole('region', { name: 'Selected point' })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+    const scrolled = scrollIntoView.mock.contexts[0] as HTMLElement
+    expect(scrolled).toContainElement(panel)
+    expect(scrolled).toHaveFocus()
+
+    // Tapping the selected cell again brings the panel back into view too.
+    await user.click(screen.getByRole('button', { name: 'Cell 51.5, -0.5' }))
+    expect(scrollIntoView).toHaveBeenCalledTimes(2)
+  })
+
+  it('below lg, scrolls to the panel after a search but leaves focus on the form', async () => {
+    matchMedia('(prefers-reduced-motion: reduce)')
+    const { user } = renderPage()
+    await waitForMap('Map of season length in 2026')
+    const form = screen.getByRole('search', { name: 'Find a point' })
+
+    await user.type(within(form).getByLabelText('Latitude'), '51.5')
+    await user.type(within(form).getByLabelText('Longitude'), '-0.5')
+    await user.click(within(form).getByRole('button', { name: 'Find cell' }))
+
+    const panel = await screen.findByRole('region', { name: 'Selected point' })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
+    // No smooth scrolling for people who ask for less motion.
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'auto' })
+    expect(scrollIntoView.mock.contexts[0]).toContainElement(panel)
+    expect(within(form).getByRole('button', { name: 'Find cell' })).toHaveFocus()
+    expect(within(form).getByRole('status')).toHaveTextContent('Selected the nearest stored point')
+  })
+
+  it('leaves scrolling and focus alone from lg up, where the panel is beside the map', async () => {
+    matchMedia('(min-width: 64rem)')
+    const { user } = renderPage()
+    await waitForMap('Map of season length in 2026')
+    const cell = screen.getByRole('button', { name: 'Cell 51.5, -0.5' })
+
+    await user.click(cell)
+
+    await screen.findByRole('region', { name: 'Selected point' })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(cell).toHaveFocus()
+  })
+
+  it('hands the map the dark theme, and follows a theme change', async () => {
+    document.documentElement.dataset.theme = 'dark'
+    renderPage()
+    await waitForMap('Map of season length in 2026')
+    expect(shownMap.props?.theme).toBe('dark')
+    expect(noDataColourOnMap()).toBe(NO_DATA_COLOUR.dark)
+
+    document.documentElement.dataset.theme = 'light'
+    await waitFor(() => expect(shownMap.props?.theme).toBe('light'))
+    expect(noDataColourOnMap()).toBe(NO_DATA_COLOUR.light)
   })
 })

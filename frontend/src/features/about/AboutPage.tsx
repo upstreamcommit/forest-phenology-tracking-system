@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { useCatalog } from '../../api/queries'
 import type { Product } from '../../api/types'
+import { PageTitle } from '../../components/PageTitle'
 import { StatusMessage } from '../../components/StatusMessage'
 import { describeError } from '../../lib/errors'
 
@@ -77,7 +78,10 @@ export function AboutPage() {
 
   return (
     <article className="mx-auto w-full max-w-3xl overflow-y-auto px-4 py-8">
-      <h1 className="text-2xl font-semibold">Data &amp; methods</h1>
+      <PageTitle>Data &amp; methods</PageTitle>
+      <h1 tabIndex={-1} className="text-2xl font-semibold outline-none">
+        Data &amp; methods
+      </h1>
       <p className="mt-2 text-ink-muted">
         The Forest Phenology Explorer shows when the growing season starts and ends, and how long
         it lasts, on a grid over Great Britain. It is a demonstration of the Forest Phenology

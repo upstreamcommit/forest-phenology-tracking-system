@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { gridFor } from '../../test/fixtures'
 import { buildColourScale } from './colourScale'
 import { buildCells } from './gridLayer'
-import { CELLS_SOURCE, LAYER_IDS, selectedFilter } from './mapLayers'
+import { CELLS_SOURCE, LAYER_IDS, OVERLAY_COLOURS, selectedFilter } from './mapLayers'
 import { PhenologyMap, type PhenologyMapProps } from './PhenologyMap'
 
 type Handler = (event?: unknown) => void
@@ -14,6 +14,8 @@ const { FakeMap } = vi.hoisted(() => {
   class FakeMap {
     static instances: FakeMap[] = []
     static failWith: Error | null = null
+    /** Whether getBounds() contains whatever it is asked about. */
+    static inView = true
 
     options: Record<string, unknown>
     handlers = new Map<string, Handler>()
@@ -62,7 +64,7 @@ const { FakeMap } = vi.hoisted(() => {
       return this.canvas
     }
     getBounds() {
-      return { contains: () => true }
+      return { contains: () => FakeMap.inView }
     }
   }
   return { FakeMap }
@@ -82,11 +84,12 @@ function fire(map: FakeMapInstance, key: string, event?: unknown) {
 
 const cells2020 = buildCells(gridFor(2020), 0.1)
 const cells2021 = buildCells(gridFor(2021), 0.1)
+const sosFill = buildColourScale({ metric: 'sos', values: [100, 120], theme: 'light' }).fillColor
 
 function props(overrides: Partial<PhenologyMapProps> = {}): PhenologyMapProps {
   return {
     cells: cells2020,
-    fillColor: buildColourScale({ metric: 'sos', values: [100, 120], theme: 'light' }).fillColor,
+    fillColor: sosFill,
     selected: null,
     computedBBox: [-1.005, 50.995, 0.005, 52.005],
     initialBBox: [-7.5, 49.5, 2.0, 59.0],
@@ -101,6 +104,7 @@ function props(overrides: Partial<PhenologyMapProps> = {}): PhenologyMapProps {
 beforeEach(() => {
   FakeMap.instances = []
   FakeMap.failWith = null
+  FakeMap.inView = true
 })
 
 describe('PhenologyMap', () => {
@@ -126,6 +130,9 @@ describe('PhenologyMap', () => {
     expect(map.getSource(CELLS_SOURCE)?.data).toBe(cells2020)
     expect(map.layers.find((l) => l.id === LAYER_IDS.fill)?.beforeId).toBe('place-labels')
     expect(map.layers.find((l) => l.id === LAYER_IDS.selected)?.beforeId).toBeUndefined()
+    // The dashed outline of the computed area is drawn over a halo, like the selection.
+    const ids = map.layers.map((l) => l.id)
+    expect(ids.indexOf(LAYER_IDS.computedHalo)).toBe(ids.indexOf(LAYER_IDS.computed) - 1)
   })
 
   it('updates data, paint and selection in place', () => {
@@ -141,6 +148,69 @@ describe('PhenologyMap', () => {
     expect(map.getSource(CELLS_SOURCE)?.setData).toHaveBeenCalledWith(cells2021)
     expect(map.setPaintProperty).toHaveBeenCalledWith(LAYER_IDS.fill, 'fill-color', fillColor)
     expect(map.setFilter).toHaveBeenCalledWith(LAYER_IDS.selected, selectedFilter(0))
+    expect(map.setFilter).toHaveBeenCalledWith(LAYER_IDS.selectedHalo, selectedFilter(0))
+
+    rerender(<PhenologyMap {...props({ cells: cells2021, fillColor, selected: null })} />)
+    expect(map.setFilter).toHaveBeenLastCalledWith(LAYER_IDS.selectedHalo, selectedFilter(null))
+  })
+
+  it('brings a selection off-screen into view and leaves one on screen alone', () => {
+    const { rerender } = render(<PhenologyMap {...props()} />)
+    const map = FakeMap.instances[0]
+    fire(map, 'style.load')
+
+    rerender(<PhenologyMap {...props({ selected: { lat: 51.5, lon: -0.5 } })} />)
+    expect(map.easeTo).not.toHaveBeenCalled()
+
+    FakeMap.inView = false
+    rerender(<PhenologyMap {...props({ selected: { lat: 51.8, lon: -0.2 } })} />)
+    expect(map.easeTo).toHaveBeenCalledTimes(1)
+    expect(map.easeTo).toHaveBeenCalledWith({ center: [-0.2, 51.8] })
+  })
+
+  it('outlines the cell under the pointer and clears it when the pointer leaves', () => {
+    render(<PhenologyMap {...props()} />)
+    const map = FakeMap.instances[0]
+    fire(map, 'style.load')
+
+    fire(map, `mousemove:${LAYER_IDS.fill}`, { features: [{ id: 3 }] })
+    expect(map.setFeatureState).toHaveBeenLastCalledWith(
+      { source: CELLS_SOURCE, id: 3 },
+      { hover: true },
+    )
+    expect(map.canvas.style.cursor).toBe('pointer')
+
+    fire(map, `mousemove:${LAYER_IDS.fill}`, { features: [{ id: 4 }] })
+    expect(map.setFeatureState).toHaveBeenCalledWith({ source: CELLS_SOURCE, id: 3 }, { hover: false })
+    expect(map.setFeatureState).toHaveBeenLastCalledWith(
+      { source: CELLS_SOURCE, id: 4 },
+      { hover: true },
+    )
+
+    fire(map, `mouseleave:${LAYER_IDS.fill}`)
+    expect(map.setFeatureState).toHaveBeenLastCalledWith(
+      { source: CELLS_SOURCE, id: 4 },
+      { hover: false },
+    )
+    expect(map.canvas.style.cursor).toBe('')
+  })
+
+  it('draws the basemap labels light on a dark halo in the dark theme only', () => {
+    const { rerender } = render(<PhenologyMap {...props()} />)
+    const map = FakeMap.instances[0]
+    fire(map, 'style.load')
+    expect(map.setPaintProperty).not.toHaveBeenCalled()
+
+    rerender(<PhenologyMap {...props({ theme: 'dark' })} />)
+    fire(map, 'style.load')
+
+    const { line, halo } = OVERLAY_COLOURS.dark
+    expect(map.setPaintProperty).toHaveBeenCalledWith('place-labels', 'text-color', line)
+    expect(map.setPaintProperty).toHaveBeenCalledWith('place-labels', 'text-halo-color', halo)
+    expect(map.setPaintProperty).toHaveBeenCalledWith('place-labels', 'text-halo-width', 1.5)
+    // Only label layers: the basemap's water and the app's own layers keep their colours.
+    const restyled = new Set(map.setPaintProperty.mock.calls.map((call) => call[0]))
+    expect([...restyled]).toEqual(['place-labels'])
   })
 
   it('hands back the stored properties of the clicked cell', () => {

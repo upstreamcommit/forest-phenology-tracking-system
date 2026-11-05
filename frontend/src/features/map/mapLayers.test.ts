@@ -5,6 +5,7 @@ import {
   bboxOutline,
   cellLayers,
   labelLayerAboveBasemap,
+  labelPaint,
   LAYER_IDS,
   outlineLayers,
   OVERLAY_COLOURS,
@@ -33,9 +34,36 @@ describe('map overlay layers', () => {
     expect(fill.type === 'fill' && fill.paint?.['fill-color']).toEqual(['to-color', '#123456'])
     expect(hover.type === 'line' && hover.paint?.['line-color']).toBe(OVERLAY_COLOURS.dark.line)
 
-    const ids = outlineLayers(3, 'light').map((layer) => layer.id)
-    expect(ids).toEqual([LAYER_IDS.computed, LAYER_IDS.selectedHalo, LAYER_IDS.selected])
+    const outlines = outlineLayers(3, 'light')
+    expect(outlines.map((layer) => layer.id)).toEqual([
+      LAYER_IDS.computedHalo,
+      LAYER_IDS.computed,
+      LAYER_IDS.selectedHalo,
+      LAYER_IDS.selected,
+    ])
     expect(OVERLAY_COLOURS.light.line).not.toBe(OVERLAY_COLOURS.dark.line)
+  })
+
+  it('draws the dashed computed-area outline over a wider halo, so it shows on any fill', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const [halo, dashed] = outlineLayers(null, theme)
+      if (halo.type !== 'line' || dashed.type !== 'line') throw new Error('expected lines')
+      expect(halo.source).toBe(dashed.source)
+      expect(halo.paint?.['line-color']).toBe(OVERLAY_COLOURS[theme].halo)
+      expect(dashed.paint?.['line-color']).toBe(OVERLAY_COLOURS[theme].line)
+      expect(dashed.paint?.['line-dasharray']).toEqual([3, 2])
+      expect(halo.paint?.['line-dasharray']).toBeUndefined()
+      expect(Number(halo.paint?.['line-width'])).toBeGreaterThan(Number(dashed.paint?.['line-width']))
+    }
+  })
+
+  it('recolours basemap labels in the dark theme only', () => {
+    expect(labelPaint('light')).toBeNull()
+    expect(labelPaint('dark')).toEqual({
+      textColor: OVERLAY_COLOURS.dark.line,
+      haloColor: OVERLAY_COLOURS.dark.halo,
+      haloWidth: 1.5,
+    })
   })
 })
 

@@ -1,8 +1,9 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { YearMetric } from '../../api/types'
+import { dateFromDayOfYear } from '../../lib/dates'
 import { timeseriesFor } from '../../test/fixtures'
 import { TrendChart } from './TrendChart'
 
@@ -12,6 +13,20 @@ const YEAR_LABEL = /^\d{4}:/
 
 function yearBar(year: number) {
   return screen.getByRole('button', { name: new RegExp(`^${year}:`) })
+}
+
+function averageRow() {
+  const table = screen.getByRole('table', { hidden: true })
+  const row = within(table).getByRole('row', { name: /^Average/, hidden: true })
+  return within(row)
+    .getAllByRole('cell', { hidden: true })
+    .map((cell) => cell.textContent)
+}
+
+/** The vertical position of a month's label on the axis. */
+function monthLabelY(container: HTMLElement, month: string) {
+  const label = [...container.querySelectorAll('svg text')].find((t) => t.textContent === month)
+  return label?.getAttribute('y')
 }
 
 describe('TrendChart', () => {
@@ -51,6 +66,39 @@ describe('TrendChart', () => {
     expect(accentBars[0]).toHaveAttribute('data-year', '2022')
   })
 
+  it('marks the highlighted year with a column background and a bold year label', () => {
+    const { container } = render(
+      <TrendChart metrics={METRICS} title="Season timing" highlightYear={2022} />,
+    )
+    const columns = container.querySelectorAll('svg rect.fill-accent-soft')
+    expect(columns).toHaveLength(1)
+    const bar = container.querySelector('svg rect[data-year="2022"]')!
+    const centre = (rect: Element) =>
+      Number(rect.getAttribute('x')) + Number(rect.getAttribute('width')) / 2
+    expect(centre(columns[0])).toBeCloseTo(centre(bar), 6)
+
+    const bold = container.querySelectorAll('svg text.font-semibold')
+    expect(bold).toHaveLength(1)
+    expect(bold[0]).toHaveTextContent('2022')
+  })
+
+  it('keeps the highlighted year labelled when a narrow chart thins the year labels', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 200, 180),
+    )
+    const { container } = render(
+      <TrendChart metrics={METRICS} title="Season timing" highlightYear={2017} />,
+    )
+    const labels = [...container.querySelectorAll('svg text')].map((t) => t.textContent)
+    // Every other year is labelled, in short form; 2017 would be skipped but is highlighted.
+    expect(labels).toEqual(expect.arrayContaining(['’16', '’17', '’18', '’26']))
+    expect(labels).not.toContain('’19')
+    const bold = container.querySelectorAll('svg text.font-semibold')
+    expect(bold).toHaveLength(1)
+    expect(bold[0]).toHaveTextContent('’17')
+    expect(container.querySelectorAll('svg rect.fill-accent-soft')).toHaveLength(1)
+  })
+
   it('draws the average start and end as reference lines', () => {
     const { container } = render(<TrendChart metrics={METRICS} title="Season timing" />)
     expect(container.querySelector('line[data-average="sos"]')).toBeInTheDocument()
@@ -88,6 +136,27 @@ describe('TrendChart', () => {
       'Start3 Apr 2022End4 Oct 2022Length184 days',
     )
     await user.unhover(screen.getByRole('img', { name: /^2022:/ }))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('keeps the tooltip open while the pointer moves onto it (WCAG 1.4.13)', async () => {
+    const user = userEvent.setup()
+    render(<TrendChart metrics={METRICS} title="Season timing" />)
+    const bar = screen.getByRole('img', { name: /^2022:/ })
+    await user.hover(bar)
+    const tooltip = screen.getByRole('tooltip')
+
+    // The tooltip lies over other years; moving onto it keeps the year it describes.
+    fireEvent.mouseOut(bar, { relatedTarget: tooltip })
+    expect(screen.getByRole('tooltip')).toBe(tooltip)
+    expect(tooltip).toHaveTextContent('2022')
+
+    // Leaving it for another year shows that year; leaving the chart hides it.
+    fireEvent.mouseOut(tooltip, { relatedTarget: screen.getByRole('img', { name: /^2021:/ }) })
+    expect(screen.getByRole('tooltip')).toHaveTextContent('2021')
+    fireEvent.mouseOut(screen.getByRole('img', { name: /^2021:/ }), {
+      relatedTarget: document.body,
+    })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
@@ -140,6 +209,37 @@ describe('TrendChart', () => {
 
     await user.click(toggle)
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('shows the same average dates and month lines whether or not the year is a leap year', () => {
+    const { container, rerender } = render(
+      <TrendChart metrics={METRICS} title="Season timing" highlightYear={2023} />,
+    )
+    const aprilY = monthLabelY(container, 'Apr')
+    expect(aprilY).toBeDefined()
+    expect(averageRow()).toEqual(['4 Apr', '19 Oct', '198 days'])
+
+    rerender(<TrendChart metrics={METRICS} title="Season timing" highlightYear={2024} />)
+    expect(monthLabelY(container, 'Apr')).toBe(aprilY)
+    expect(averageRow()).toEqual(['4 Apr', '19 Oct', '198 days'])
+  })
+
+  it('gives the average a length that matches its rounded dates', () => {
+    // Average start day 87.818, end day 296.455 and length 208.636: rounded separately, the
+    // dates (29 Mar to 23 Oct) would be 208 days apart but the length would say 209.
+    const metrics: YearMetric[] = Array.from({ length: 11 }, (_, i) => {
+      const year = 2013 + i
+      const [sos, eos] = i === 0 ? [86, 301] : [88, 296]
+      return {
+        year,
+        is_forest: true,
+        sos_date: dateFromDayOfYear(year, sos),
+        eos_date: dateFromDayOfYear(year, eos),
+        season_length: eos - sos,
+      }
+    })
+    render(<TrendChart metrics={metrics} title="Season timing" />)
+    expect(averageRow()).toEqual(['29 Mar', '23 Oct', '208 days'])
   })
 
   it('marks years with missing dates instead of drawing a bar', async () => {

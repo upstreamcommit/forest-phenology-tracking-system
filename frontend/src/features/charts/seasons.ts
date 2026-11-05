@@ -3,6 +3,12 @@ import { dayOfYear } from '../../lib/dates'
 
 type SeasonFields = Pick<YearMetric, 'year' | 'sos_date' | 'eos_date' | 'season_length'>
 
+/**
+ * A non-leap year for showing days of year that belong to no one year, such as an average over
+ * several years or the month lines of a chart, so they read the same whichever year is selected.
+ */
+export const REFERENCE_YEAR = 2023
+
 /** One season as days of year, so seasons from different years can be compared. */
 export interface SeasonDays {
   year: number
@@ -46,6 +52,23 @@ export function averageSeason(metrics: readonly SeasonFields[]): SeasonAverage |
     firstYear: Math.min(...years),
     lastYear: Math.max(...years),
   }
+}
+
+/** An average season in whole days, as the app shows it. */
+export interface WholeDaySeason {
+  sos: number
+  eos: number
+  length: number
+}
+
+/**
+ * The average start and end rounded to whole days, with the length taken from those rounded
+ * dates (a season's length is its end minus its start), so the three never disagree by a day.
+ */
+export function wholeDayAverage(average: SeasonAverage): WholeDaySeason {
+  const sos = Math.round(average.sos)
+  const eos = Math.round(average.eos)
+  return { sos, eos, length: eos - sos }
 }
 
 /** "2016–2026", or a single year when the range is one year. */

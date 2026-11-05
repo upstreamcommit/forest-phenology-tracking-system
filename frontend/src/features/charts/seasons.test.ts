@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
+import { dayOfYear } from '../../lib/dates'
 import { timeseriesFor } from '../../test/fixtures'
-import { averageSeason, seasonDays, yearRange } from './seasons'
+import {
+  averageSeason,
+  REFERENCE_YEAR,
+  seasonDays,
+  wholeDayAverage,
+  yearRange,
+  type SeasonAverage,
+} from './seasons'
 
 describe('seasonDays', () => {
   it('turns the dates into days of year', () => {
@@ -43,6 +51,26 @@ describe('averageSeason', () => {
     expect(average).toMatchObject({ count: 2, firstYear: 2016, lastYear: 2018, length: 183 })
     expect(averageSeason([{ year: 2017, sos_date: null, eos_date: null }])).toBeNull()
     expect(averageSeason([])).toBeNull()
+  })
+})
+
+describe('wholeDayAverage', () => {
+  it('rounds the dates and takes the length from them, so the three agree', () => {
+    const average: SeasonAverage = {
+      sos: 87.818,
+      eos: 296.455,
+      length: 208.636,
+      count: 11,
+      firstYear: 2016,
+      lastYear: 2026,
+    }
+    expect(wholeDayAverage(average)).toEqual({ sos: 88, eos: 296, length: 208 })
+  })
+})
+
+describe('REFERENCE_YEAR', () => {
+  it('is not a leap year', () => {
+    expect(dayOfYear(`${REFERENCE_YEAR}-12-31`)).toBe(365)
   })
 })
 

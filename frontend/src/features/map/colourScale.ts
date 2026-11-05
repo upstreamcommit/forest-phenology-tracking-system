@@ -1,7 +1,7 @@
 import type { ExpressionSpecification } from 'maplibre-gl'
 
 import type { ResolvedTheme } from '../../lib/theme'
-import { METRICS, type MetricKey } from './metrics'
+import { type Domain, METRICS, type MetricKey } from './metrics'
 
 /**
  * viridis in nine stops: perceptually uniform, ordered in lightness (so it survives greyscale)
@@ -47,15 +47,12 @@ interface LegendBase {
   noData: { label: string; colour: string } | null
 }
 
+/** The bar's end colours also stand for every value beyond them, so the end labels say so. */
 export interface GradientLegend extends LegendBase {
   kind: 'gradient'
   /** Colour stops for a left-to-right CSS gradient. */
   stops: { offset: number; colour: string }[]
   ticks: LegendTick[]
-  /** Values below the first tick exist and are drawn in the first colour. */
-  clampedLow: boolean
-  /** Values above the last tick exist and are drawn in the last colour. */
-  clampedHigh: boolean
 }
 
 export interface CategoryLegend extends LegendBase {
@@ -63,17 +60,12 @@ export interface CategoryLegend extends LegendBase {
   items: { value: number; label: string; colour: string }[]
 }
 
-/** The legend has no scale to show: no cell has a value for the metric. */
-export interface EmptyLegend extends LegendBase {
-  kind: 'empty'
-}
-
-export type LegendData = GradientLegend | CategoryLegend | EmptyLegend
+export type LegendData = GradientLegend | CategoryLegend
 
 export interface ColourScale {
   metric: MetricKey
-  /** The value range the palette spans (numeric metrics with data only). */
-  domain: [number, number] | null
+  /** The value range the palette spans (numeric metrics only), the same in every year. */
+  domain: Domain | null
   /** MapLibre fill-color for features whose property `metric` holds the value. */
   fillColor: ExpressionSpecification
   legend: LegendData
@@ -81,43 +73,8 @@ export interface ColourScale {
   colourFor: (value: number | null) => string
 }
 
-/** Linear-interpolated quantile (type 7) of an ascending array. */
-export function quantile(sorted: readonly number[], p: number): number {
-  if (sorted.length === 0) return NaN
-  const h = (sorted.length - 1) * Math.min(1, Math.max(0, p))
-  const lo = Math.floor(h)
-  const hi = Math.min(lo + 1, sorted.length - 1)
-  return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo])
-}
-
-/** The rounding step for a domain: 5 days for narrow spreads, 10 for wider ones. */
-export function niceStep(span: number): number {
-  return span > 50 ? 10 : 5
-}
-
-function finiteValues(values: readonly (number | null)[]): number[] {
-  return values.filter((v): v is number => v !== null && Number.isFinite(v)).sort((a, b) => a - b)
-}
-
-/**
- * The range a sequential palette spans: the 2nd to 98th percentile of the values, rounded
- * outward to a multiple of 5 or 10, so one outlier cannot wash out the rest of the map.
- * Null when there are no values.
- */
-export function robustDomain(values: readonly (number | null)[]): [number, number] | null {
-  const sorted = finiteValues(values)
-  if (sorted.length === 0) return null
-  const p2 = quantile(sorted, 0.02)
-  const p98 = quantile(sorted, 0.98)
-  const step = niceStep(p98 - p2)
-  const min = Math.floor(p2 / step) * step
-  let max = Math.ceil(p98 / step) * step
-  if (max <= min) max = min + step
-  return [min, max]
-}
-
 /** Where each palette colour sits in the domain, evenly spaced. */
-function paletteStops([min, max]: [number, number]): { value: number; colour: string }[] {
+function paletteStops([min, max]: Domain): { value: number; colour: string }[] {
   const last = SEQUENTIAL_PALETTE.length - 1
   return SEQUENTIAL_PALETTE.map((colour, i) => ({ value: min + ((max - min) * i) / last, colour }))
 }
@@ -133,7 +90,7 @@ function toHex(rgb: number[]): string {
 
 /** The palette colour for a value, interpolated in RGB as MapLibre does and clamped at the
  * ends. */
-export function sequentialColour(value: number, domain: [number, number]): string {
+export function sequentialColour(value: number, domain: Domain): string {
   const stops = paletteStops(domain)
   if (value <= stops[0].value) return stops[0].colour
   const last = stops[stops.length - 1]
@@ -147,14 +104,15 @@ export function sequentialColour(value: number, domain: [number, number]): strin
   return toHex(ca.map((c, k) => c + t * (cb[k] - c)))
 }
 
+const TICK_STEPS = [5, 10, 20, 30, 50, 100]
+
 /**
  * Tick values for the legend: both ends of the domain plus round values between them, at most
  * five in all, never crowding an end.
  */
-export function legendTickValues([min, max]: [number, number]): number[] {
+export function legendTickValues([min, max]: Domain): number[] {
   const span = max - min
-  const base = niceStep(span)
-  const tickStep = [1, 2, 5, 10, 20, 50].map((k) => k * base).find((s) => span / s <= 4) ?? span
+  const tickStep = TICK_STEPS.find((s) => span / s <= 4) ?? span
   const ticks = [min]
   // Interior ticks keep three quarters of a step clear of the ends, or their labels collide.
   const clearance = tickStep * 0.75
@@ -165,25 +123,58 @@ export function legendTickValues([min, max]: [number, number]): number[] {
   return ticks
 }
 
+/** Estimated width of one character of a legend label (12px text), and the gap labels keep. */
+const LABEL_CHAR_WIDTH = 7
+const LABEL_GAP = 8
+
+/**
+ * The ticks whose labels fit side by side on a bar `width` pixels wide: both ends always, and an
+ * interior tick only when its label keeps a small gap from its neighbours. Widths are estimated
+ * from the label length; the first label starts at its tick, the last ends at its tick and the
+ * others are centred on theirs.
+ */
+export function fitTicks(ticks: readonly LegendTick[], width: number): LegendTick[] {
+  const last = ticks.length - 1
+  if (last < 2) return [...ticks]
+  const extent = (i: number): [number, number] => {
+    const labelWidth = ticks[i].label.length * LABEL_CHAR_WIDTH
+    const x = ticks[i].offset * width
+    if (i === 0) return [x, x + labelWidth]
+    if (i === last) return [x - labelWidth, x]
+    return [x - labelWidth / 2, x + labelWidth / 2]
+  }
+  const lastStart = extent(last)[0]
+  const kept = [ticks[0]]
+  let previousEnd = extent(0)[1]
+  for (let i = 1; i < last; i++) {
+    const [start, end] = extent(i)
+    if (start - previousEnd >= LABEL_GAP && lastStart - end >= LABEL_GAP) {
+      kept.push(ticks[i])
+      previousEnd = end
+    }
+  }
+  kept.push(ticks[last])
+  return kept
+}
+
 function hasNull(values: readonly (number | null)[]): boolean {
   return values.some((v) => v === null || !Number.isFinite(v))
 }
 
 /**
- * The colour scale for one metric over the values currently on the map. Numeric metrics get the
- * sequential palette over a robust domain; the forest flag gets two category colours.
+ * The colour scale for one metric. Numeric metrics get the sequential palette over the metric's
+ * fixed domain, the same in every year; the forest flag gets two category colours. `values` are
+ * the values on the map, which only decide whether the legend needs a "No data" entry; leave
+ * them out while no grid has loaded.
  */
 export function buildColourScale({
   metric,
-  values,
+  values = [],
   theme,
-  year,
 }: {
   metric: MetricKey
-  values: readonly (number | null)[]
+  values?: readonly (number | null)[]
   theme: ResolvedTheme
-  /** The year shown, so day-of-year ticks read as that year's dates. */
-  year?: number
 }): ColourScale {
   const definition = METRICS[metric]
   const noDataColour = NO_DATA_COLOUR[theme]
@@ -208,26 +199,13 @@ export function buildColourScale({
     }
   }
 
-  const domain = robustDomain(values)
-  if (domain === null) {
-    return {
-      metric,
-      domain: null,
-      fillColor: ['to-color', noDataColour],
-      legend: { kind: 'empty', noData },
-      colourFor: () => noDataColour,
-    }
-  }
-
+  const { domain } = definition
   const [min, max] = domain
-  const finite = finiteValues(values)
-  const clampedLow = finite[0] < min
-  const clampedHigh = finite[finite.length - 1] > max
+  // Day-of-year ticks read as dates of a non-leap year, so the legend is the same every year.
   const ticks = legendTickValues(domain).map((value, i, all) => {
-    const label = definition.format(value, year)
-    const isLast = i === all.length - 1
-    const prefix = i === 0 && clampedLow ? '≤ ' : isLast && clampedHigh ? '≥ ' : ''
-    return { value, offset: (value - min) / (max - min), label: `${prefix}${label}` }
+    const prefix = i === 0 ? '≤ ' : i === all.length - 1 ? '≥ ' : ''
+    const label = `${prefix}${definition.format(value)}`
+    return { value, offset: (value - min) / (max - min), label }
   })
 
   const stops = paletteStops(domain).flatMap((s) => [s.value, s.colour])
@@ -247,8 +225,6 @@ export function buildColourScale({
         colour,
       })),
       ticks,
-      clampedLow,
-      clampedHigh,
       noData,
     },
     colourFor: (value) =>

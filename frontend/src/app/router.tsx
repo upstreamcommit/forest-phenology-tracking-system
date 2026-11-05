@@ -2,6 +2,7 @@ import { createBrowserRouter, type RouteObject } from 'react-router'
 
 import { AboutPage } from '../features/about/AboutPage'
 import { AppShell } from './AppShell'
+import { MapRoute } from './MapRoute'
 import { NotFoundPage } from './NotFoundPage'
 import { RouteErrorPage } from './RouteErrorPage'
 
@@ -10,13 +11,7 @@ export const routes: RouteObject[] = [
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
-      {
-        index: true,
-        // MapLibre is most of the bundle, so the map page loads on demand.
-        lazy: async () => ({
-          Component: (await import('../features/map/MapExplorerPage')).MapExplorerPage,
-        }),
-      },
+      { index: true, element: <MapRoute /> },
       { path: 'about', element: <AboutPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

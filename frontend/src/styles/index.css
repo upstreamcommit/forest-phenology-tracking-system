@@ -82,10 +82,14 @@
 }
 
 @layer base {
-  html,
-  body,
-  #root {
-    height: 100%;
+  /* From lg up the app fits the viewport and the map fills the space under the header. Narrower
+     screens scroll the document as usual, header included. */
+  @media (width >= 64rem) {
+    html,
+    body,
+    #root {
+      height: 100%;
+    }
   }
 
   body {
@@ -105,4 +109,70 @@
       transition-duration: 0.01ms !important;
     }
   }
+}
+
+/*
+ * MapLibre. Its stylesheet loads later, with the map, so these rules sit outside the layers and
+ * are more specific than the ones they override.
+ */
+
+/* The canvas is a tab stop for keyboard panning, but the map clips outlines, so the focus ring
+   is drawn inside the map: the focus colour with a surface-coloured line inside it, which shows
+   against any cell colour. */
+.maplibregl-map .maplibregl-canvas:focus-visible {
+  outline: none;
+}
+
+.maplibregl-map:has(.maplibregl-canvas:focus-visible)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 3px var(--focus),
+    inset 0 0 0 5px var(--surface);
+}
+
+/* Controls in the dark theme's colours (MapLibre draws them light). */
+[data-theme='dark'] .maplibregl-ctrl-group {
+  background: var(--surface);
+}
+
+[data-theme='dark'] .maplibregl-ctrl-group:not(:empty) {
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+[data-theme='dark'] .maplibregl-ctrl-group button + button {
+  border-top-color: var(--line-strong);
+}
+
+/* The icons are dark grey images; inverted they turn light grey. */
+[data-theme='dark'] .maplibregl-ctrl button .maplibregl-ctrl-icon,
+[data-theme='dark'] .maplibregl-ctrl-attrib .maplibregl-ctrl-attrib-button {
+  filter: invert(1);
+}
+
+@media (hover: hover) {
+  [data-theme='dark'] .maplibregl-ctrl button:not(:disabled):hover {
+    background-color: var(--surface-sunken);
+  }
+}
+
+[data-theme='dark'] .maplibregl-ctrl button:not(:disabled):active {
+  background-color: var(--surface-sunken);
+}
+
+[data-theme='dark'] .maplibregl-ctrl.maplibregl-ctrl-attrib,
+[data-theme='dark'] .maplibregl-ctrl-attrib.maplibregl-compact {
+  background-color: var(--surface);
+  color: var(--ink-muted);
+}
+
+[data-theme='dark'] .maplibregl-ctrl-attrib a {
+  color: var(--ink-muted);
+}
+
+[data-theme='dark'] .maplibregl-ctrl-attrib a:hover {
+  color: var(--ink);
 }

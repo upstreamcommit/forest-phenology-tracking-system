@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
-import { PRODUCT, YEARS } from '../../test/fixtures'
+import { pointFor, PRODUCT, timeseriesFor, YEARS } from '../../test/fixtures'
 import { renderWithProviders } from '../../test/render'
 import { server } from '../../test/server'
 import { PointPanel, type PointPanelProps } from './PointPanel'
@@ -39,6 +39,33 @@ describe('PointPanel', () => {
     )
     expect(await screen.findByRole('heading', { name: '2022 season' })).toBeInTheDocument()
     expect(screen.queryByText('Loading point metrics')).not.toBeInTheDocument()
+  })
+
+  it('sends the exact stored coordinates to both endpoints', async () => {
+    // Stored lookups match by exact equality, so the doubles must reach the API unrounded.
+    const lat = 51.300000000000004
+    const lon = -0.30000000000000004
+    const sent: Record<string, [string | null, string | null]> = {}
+    server.use(
+      http.get('*/phenology/point', ({ request }) => {
+        const q = new URL(request.url).searchParams
+        sent.point = [q.get('lat'), q.get('lon')]
+        return HttpResponse.json(pointFor(lat, lon, 2022))
+      }),
+      http.get('*/phenology/timeseries', ({ request }) => {
+        const q = new URL(request.url).searchParams
+        sent.timeseries = [q.get('lat'), q.get('lon')]
+        return HttpResponse.json(timeseriesFor(lat, lon, 2016, 2026))
+      }),
+    )
+    renderPanel({ lat, lon })
+
+    await screen.findByRole('heading', { name: '2022 season' })
+    await screen.findByRole('figure', { name: 'Season timing, 2016–2026' })
+    expect(sent).toEqual({
+      point: ['51.300000000000004', '-0.30000000000000004'],
+      timeseries: ['51.300000000000004', '-0.30000000000000004'],
+    })
   })
 
   it('shows the stored dates, length and land cover for the year', async () => {

@@ -1,5 +1,6 @@
 import { isRouteErrorResponse, Link, useRouteError } from 'react-router'
 
+import { PageTitle } from '../components/PageTitle'
 import { describeError } from '../lib/errors'
 
 /** Shown when a route fails to load or render, instead of a blank page. */
@@ -11,6 +12,7 @@ export function RouteErrorPage() {
 
   return (
     <div role="alert" className="mx-auto max-w-xl px-4 py-16">
+      <PageTitle>Something went wrong</PageTitle>
       <h1 className="text-2xl font-semibold">Something went wrong</h1>
       <p className="mt-2 text-ink-muted">{message}</p>
       <div className="mt-6 flex gap-4">

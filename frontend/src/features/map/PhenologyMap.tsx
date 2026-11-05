@@ -29,6 +29,7 @@ import {
   cellLayers,
   COMPUTED_SOURCE,
   labelLayerAboveBasemap,
+  labelPaint,
   LAYER_IDS,
   outlineLayers,
   selectedFilter,
@@ -132,7 +133,17 @@ function MapView({
   // Runs on every style load, so it always draws the latest props.
   const addOverlay = useEffectEvent((map: MapLibreMap) => {
     styleLoaded.current = true
-    const labelsAbove = labelLayerAboveBasemap(map.getStyle().layers)
+    const basemapLayers = map.getStyle().layers
+    const labels = labelPaint(theme)
+    if (labels) {
+      for (const layer of basemapLayers) {
+        if (layer.type !== 'symbol') continue
+        map.setPaintProperty(layer.id, 'text-color', labels.textColor)
+        map.setPaintProperty(layer.id, 'text-halo-color', labels.haloColor)
+        map.setPaintProperty(layer.id, 'text-halo-width', labels.haloWidth)
+      }
+    }
+    const labelsAbove = labelLayerAboveBasemap(basemapLayers)
     map.addSource(CELLS_SOURCE, { type: 'geojson', data: cells })
     map.addSource(COMPUTED_SOURCE, { type: 'geojson', data: bboxOutline(computedBBox) })
     for (const layer of cellLayers(fillColor, theme)) map.addLayer(layer, labelsAbove)

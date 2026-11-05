@@ -27,13 +27,17 @@ for (const theme of ['light', 'dark'] as const) {
       page,
     }) => {
       await page.goto('/?lat=51.5&lon=-0.5')
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await expect(page.getByText('2026 season')).toBeVisible()
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
       await expectNoSeriousViolations(page)
     })
 
     test('data and methods page has no serious accessibility violations', async ({ page }) => {
       await page.goto('/about')
       await expect(page.getByText(/0\.01° pixels/)).toBeVisible()
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+      await expect(page).toHaveTitle('Data & methods · Forest Phenology Explorer')
       await expectNoSeriousViolations(page)
     })
   })

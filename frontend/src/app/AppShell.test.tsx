@@ -1,14 +1,17 @@
-import { screen, within } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { createMemoryRouter, RouterProvider } from 'react-router'
+import { describe, expect, it, vi } from 'vitest'
 
 import { catalog } from '../test/fixtures'
-import { renderWithProviders } from '../test/render'
+import { renderWithProviders, testQueryClient } from '../test/render'
 import { server } from '../test/server'
 import { AboutPage } from '../features/about/AboutPage'
 import { AppShell } from './AppShell'
 import { NotFoundPage } from './NotFoundPage'
+import { RouteErrorPage } from './RouteErrorPage'
 
 function renderShell(route = '/about') {
   return renderWithProviders(<AppShell />, {
@@ -59,6 +62,25 @@ describe('AppShell', () => {
     expect(screen.queryByText(/synthetic/)).not.toBeInTheDocument()
   })
 
+  it('marks the current page in the navigation with an underline, not only colour', () => {
+    renderShell('/')
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    const current = within(nav).getByRole('link', { name: 'Map' })
+    const other = within(nav).getByRole('link', { name: 'Data & methods' })
+    expect(current).toHaveAttribute('aria-current', 'page')
+    expect(current).toHaveClass('underline')
+    expect(other).not.toHaveAttribute('aria-current')
+    expect(other).not.toHaveClass('underline')
+  })
+
+  it('starts with a saved dark theme', () => {
+    localStorage.setItem('fpts-theme', 'dark')
+    renderShell('/')
+    expect(screen.getByRole('radio', { name: 'Dark' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Auto' })).toHaveAttribute('aria-checked', 'false')
+    expect(document.documentElement.dataset.theme).toBe('dark')
+  })
+
   it('switches and remembers the theme', async () => {
     const user = userEvent.setup()
     renderShell('/')
@@ -97,5 +119,28 @@ describe('NotFoundPage', () => {
     renderWithProviders(<NotFoundPage />, { route: '/nowhere', path: '*' })
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Back to the map' })).toHaveAttribute('href', '/')
+  })
+})
+
+describe('RouteErrorPage', () => {
+  it('says what went wrong, in the page title too', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const router = createMemoryRouter([
+      {
+        path: '/',
+        loader: () => {
+          throw new Error('The map could not be loaded.')
+        },
+        element: null,
+        errorElement: <RouteErrorPage />,
+      },
+    ])
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('The map could not be loaded.')
+    expect(document.title).toBe('Something went wrong · Forest Phenology Explorer')
   })
 })

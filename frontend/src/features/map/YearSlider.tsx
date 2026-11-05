@@ -1,6 +1,7 @@
 import { useId } from 'react'
 
 import { Button } from '../../components/Button'
+import { useDraft } from '../../lib/useDraft'
 
 interface YearSliderProps {
   /** Selectable years, ascending. */
@@ -9,15 +10,27 @@ interface YearSliderProps {
   onChange: (year: number) => void
 }
 
+// The end buttons stay focusable when they cannot move further (aria-disabled rather than
+// disabled), so focus is not lost when a press reaches the first or last year.
+const STEP_BUTTON = 'px-2 aria-disabled:cursor-not-allowed aria-disabled:opacity-50'
+
 /**
  * Picks one of the stored years. The range input steps through the list by index, so gaps
- * between years are skipped; the buttons step one stored year at a time.
+ * between years are skipped; the buttons step one stored year at a time. The year shown follows
+ * each change at once, while `value` (the URL) catches up.
  */
 export function YearSlider({ years, value, onChange }: YearSliderProps) {
   const inputId = useId()
-  const index = Math.max(0, years.indexOf(value))
+  const [year, setYear] = useDraft(value)
+  const index = Math.max(0, years.indexOf(year))
   const previous = years[index - 1]
   const next = years[index + 1]
+
+  const choose = (target: number | undefined) => {
+    if (target === undefined || target === year) return
+    setYear(target)
+    onChange(target)
+  }
 
   return (
     <div className="flex flex-col gap-1">
@@ -26,17 +39,17 @@ export function YearSlider({ years, value, onChange }: YearSliderProps) {
           Year
         </label>
         <span aria-hidden="true" className="text-lg font-semibold tabular-nums text-ink">
-          {value}
+          {year}
         </span>
       </div>
       <div className="flex items-center gap-1">
         <Button
           variant="ghost"
-          className="px-2"
+          className={STEP_BUTTON}
           aria-label="Previous year"
           title="Previous year"
-          disabled={previous === undefined}
-          onClick={() => previous !== undefined && onChange(previous)}
+          aria-disabled={previous === undefined}
+          onClick={() => choose(previous)}
         >
           <span aria-hidden="true">‹</span>
         </Button>
@@ -47,20 +60,17 @@ export function YearSlider({ years, value, onChange }: YearSliderProps) {
           max={Math.max(0, years.length - 1)}
           step={1}
           value={index}
-          aria-valuetext={String(value)}
-          onChange={(event) => {
-            const year = years[Number(event.target.value)]
-            if (year !== undefined) onChange(year)
-          }}
+          aria-valuetext={String(year)}
+          onChange={(event) => choose(years[Number(event.target.value)])}
           className="min-w-0 flex-1 accent-accent"
         />
         <Button
           variant="ghost"
-          className="px-2"
+          className={STEP_BUTTON}
           aria-label="Next year"
           title="Next year"
-          disabled={next === undefined}
-          onClick={() => next !== undefined && onChange(next)}
+          aria-disabled={next === undefined}
+          onClick={() => choose(next)}
         >
           <span aria-hidden="true">›</span>
         </Button>
