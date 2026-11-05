@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+/* Dark mode follows data-theme on <html>, set before first paint by index.html. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Semantic design tokens. Components use these through the Tailwind theme below
+ * (bg-surface, text-ink-muted, border-line ...), never raw colours, so both themes stay in step.
+ * Text tokens meet 4.5:1 on --bg and --surface in both themes.
+ */
+:root {
+  color-scheme: light;
+  --bg: #f6f7f4;
+  --surface: #ffffff;
+  --surface-sunken: #eef1ec;
+  --ink: #1c2620;
+  --ink-muted: #46554b;
+  --ink-subtle: #5d6c62;
+  --line: #d6ddd4;
+  --line-strong: #b5c0b8;
+  --accent: #2f6b45;
+  --accent-hover: #255a39;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3efe6;
+  --focus: #1f6feb;
+  --warn: #8a5300;
+  --warn-soft: #fbf0dc;
+  --danger: #b42318;
+  --danger-soft: #fde8e6;
+  --ok: #217a3c;
+  --ok-soft: #e1f2e6;
+  --shadow: 0 1px 2px rgb(16 24 20 / 0.06), 0 4px 16px rgb(16 24 20 / 0.08);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1512;
+  --surface: #161e19;
+  --surface-sunken: #0b100d;
+  --ink: #e7ede8;
+  --ink-muted: #b4c2b8;
+  --ink-subtle: #93a398;
+  --line: #2a352e;
+  --line-strong: #3d4b42;
+  --accent: #6fbf8a;
+  --accent-hover: #86cf9e;
+  --accent-ink: #0b130e;
+  --accent-soft: #1d2e23;
+  --focus: #79a8ff;
+  --warn: #f0b35a;
+  --warn-soft: #33270f;
+  --danger: #f47066;
+  --danger-soft: #3a1714;
+  --ok: #6fcf8a;
+  --ok-soft: #14301d;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px rgb(0 0 0 / 0.35);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --shadow-panel: var(--shadow);
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

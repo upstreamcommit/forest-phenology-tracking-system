@@ -1,0 +1,88 @@
+import type { GridPointProperties } from '../../api/types'
+import { dateFromDayOfYear, dayOfYear, formatDayMonth } from '../../lib/dates'
+import { formatDays } from '../../lib/format'
+
+export type MetricKey = 'season_length' | 'sos' | 'eos' | 'forest'
+
+export interface MetricDefinition {
+  key: MetricKey
+  label: string
+  /** One sentence for screen readers and tooltips. */
+  description: string
+  /** Unit of the raw value: days, day of year, or none for the forest flag. */
+  unit: 'days' | 'day of year' | ''
+  kind: 'sequential' | 'categorical'
+  /** The raw value for a grid point: days, a day of year (1-366), or 1/0 for forest. */
+  value: (point: GridPointProperties) => number | null
+  /**
+   * The value as people read it: "193 days", "11 Apr", "Forest". Days of year become dates in
+   * `year`, which matters only for the day after 28 February in leap years.
+   */
+  format: (value: number | null, year?: number) => string
+}
+
+const NO_DATA = 'No data'
+/** A non-leap year, for days of year that have no particular year. */
+const REFERENCE_YEAR = 2023
+
+function formatDayOfYear(doy: number | null, year = REFERENCE_YEAR): string {
+  if (doy === null || !Number.isFinite(doy)) return NO_DATA
+  return formatDayMonth(dateFromDayOfYear(year, Math.round(doy)))
+}
+
+function doyOf(iso: string | null): number | null {
+  if (iso === null) return null
+  try {
+    return dayOfYear(iso)
+  } catch {
+    return null
+  }
+}
+
+export const METRICS: Record<MetricKey, MetricDefinition> = {
+  season_length: {
+    key: 'season_length',
+    label: 'Season length',
+    description: 'Number of days between the start and the end of the growing season.',
+    unit: 'days',
+    kind: 'sequential',
+    value: (p) => p.season_length,
+    format: (value) => (value === null ? NO_DATA : formatDays(Math.round(value))),
+  },
+  sos: {
+    key: 'sos',
+    label: 'Start of season',
+    description: 'Date the growing season starts, when greenness rises past the threshold.',
+    unit: 'day of year',
+    kind: 'sequential',
+    value: (p) => doyOf(p.sos_date),
+    format: formatDayOfYear,
+  },
+  eos: {
+    key: 'eos',
+    label: 'End of season',
+    description: 'Date the growing season ends, when greenness falls back below the threshold.',
+    unit: 'day of year',
+    kind: 'sequential',
+    value: (p) => doyOf(p.eos_date),
+    format: formatDayOfYear,
+  },
+  forest: {
+    key: 'forest',
+    label: 'Forest',
+    description: 'Whether the grid cell is classed as forest or as open land.',
+    unit: '',
+    kind: 'categorical',
+    value: (p) => (p.is_forest ? 1 : 0),
+    format: (value) => (value === null ? NO_DATA : value === 1 ? 'Forest' : 'Open land'),
+  },
+}
+
+/** Display order of the metric picker. */
+export const METRIC_KEYS: MetricKey[] = ['season_length', 'sos', 'eos', 'forest']
+
+export const DEFAULT_METRIC: MetricKey = 'season_length'
+
+export function isMetricKey(value: unknown): value is MetricKey {
+  return typeof value === 'string' && (METRIC_KEYS as string[]).includes(value)
+}
