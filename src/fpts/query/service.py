@@ -7,7 +7,7 @@ from fpts.cache.keys import (
 )
 from fpts.cache.redis_cache import RedisTTLCache
 from fpts.cache.ttl_cache import InMemoryTTLCache
-from fpts.domain.models import Location, PhenologyMetric
+from fpts.domain.models import BoundingBox, Location, PhenologyMetric
 from fpts.storage.phenology_repository import PhenologyRepository
 from fpts.utils.logging import get_logger
 
@@ -146,3 +146,17 @@ class QueryService:
             self._area_stats_cache.set(key, stats)
 
         return stats
+
+    def get_grid(
+        self,
+        *,
+        product: str,
+        year: int,
+        bbox: BoundingBox | None,
+        limit: int,
+    ) -> list[PhenologyMetric]:
+        """
+        Stored metrics for every grid point of one product and year, optionally inside a bbox.
+        Not cached: one indexed query, and its responses are large.
+        """
+        return self._repository.get_grid(product=product, year=year, bbox=bbox, limit=limit)

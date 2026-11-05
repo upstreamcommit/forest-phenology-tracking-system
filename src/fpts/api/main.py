@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from fpts.api.routers.catalog import router as catalog_router
 from fpts.api.routers.debug import router as debug_router
 from fpts.api.routers.health import router as health_router
 from fpts.api.routers.metrics import router as metrics_router
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Routers and middleware
     app.include_router(health_router)
+    app.include_router(catalog_router)
     app.include_router(phenology_router)
 
     app.add_middleware(RequestLoggingMiddleware)

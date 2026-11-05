@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import rasterio
 import rioxarray
 import xarray as xr
 
@@ -18,6 +19,30 @@ _DOY_RE = re.compile(r"doy_(\d{3})\.tif$")
 class NdviTimeSeries:
     doys: list[int]
     ndvi: list[float]
+    # Centre of the sampled pixel, when known.
+    pixel: Location | None = None
+
+
+@dataclass(frozen=True)
+class RasterExtent:
+    crs: str | None
+    # Outer pixel edges in CRS units: min_x, min_y, max_x, max_y.
+    bounds: tuple[float, float, float, float]
+    # Pixel width and height in CRS units.
+    pixel_size: tuple[float, float]
+
+
+def raster_extent(path: Path) -> RasterExtent:
+    """
+    Read a GeoTIFF's CRS, outer bounds and pixel size from its header (no pixel data).
+    """
+    with rasterio.open(path) as src:
+        b = src.bounds
+        return RasterExtent(
+            crs=src.crs.to_string() if src.crs else None,
+            bounds=(b.left, b.bottom, b.right, b.top),
+            pixel_size=(abs(src.res[0]), abs(src.res[1])),
+        )
 
 
 def _doy_from_filename(path: Path) -> int:
@@ -77,7 +102,8 @@ def extract_ndvi_timeseries(
     values = sampled.isel(band=0).values
     doys = [int(time) for time in sampled["time"].values.tolist()]
     ndvi = [float(val) for val in values.tolist()]
-    return NdviTimeSeries(doys=doys, ndvi=ndvi)
+    pixel = Location(lat=float(sampled["y"]), lon=float(sampled["x"]))
+    return NdviTimeSeries(doys=doys, ndvi=ndvi, pixel=pixel)
 
 
 def extract_ndvi_timeseries_batch(

@@ -1,20 +1,32 @@
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 
-from fpts.api.dependencies import get_phenology_compute_service, get_query_service
+from fpts.api.dependencies import (
+    get_phenology_compute_service,
+    get_query_service,
+    get_settings,
+)
 from fpts.api.schemas import (
     GeoJSONPolygonRequest,
+    GridFeature,
+    GridPointGeometry,
+    GridPointProperties,
     LocationSchema,
+    NdviObservationSchema,
     PhenologyAreaStatsResponse,
+    PhenologyGridResponse,
+    PhenologyNdviCurveResponse,
     PhenologyPointResponse,
     PhenologyPointsRequest,
     PhenologyTimeseriesResponse,
     PhenologyYearMetricSchema,
     SeasonLengthStat,
 )
-from fpts.domain.models import Location
+from fpts.config.settings import Settings
+from fpts.domain.models import BoundingBox, Location
 from fpts.processing.phenology_algorithm import DEFAULT_THRESHOLD_FRAC
 from fpts.processing.phenology_service import PhenologyComputationService
 from fpts.query.service import QueryService
@@ -288,4 +300,129 @@ def get_area_phenology_stats(
         mean_season_length=stats.get("mean_season_length"),
         median_season_length=stats.get("median_season_length"),
         forest_fraction=stats.get("forest_fraction"),
+    )
+
+
+def _bbox_error(bbox: str, msg: str) -> RequestValidationError:
+    # Same 422 body as FastAPI's own parameter validation, which OpenAPI documents.
+    return RequestValidationError(
+        [{"type": "value_error", "loc": ("query", "bbox"), "msg": msg, "input": bbox}]
+    )
+
+
+def _parse_bbox(bbox: str | None) -> BoundingBox | None:
+    if bbox is None:
+        return None
+    parts = bbox.split(",")
+    if len(parts) != 4:
+        raise _bbox_error(bbox, "bbox must be four comma-separated numbers")
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(p) for p in parts)
+        return BoundingBox(min_lon=min_lon, min_lat=min_lat, max_lon=max_lon, max_lat=max_lat)
+    except ValueError as e:
+        raise _bbox_error(bbox, f"Invalid bbox: {e}") from e
+
+
+@router.get("/grid", response_model=PhenologyGridResponse)
+def get_phenology_grid(
+    year: int = Query(..., ge=2000, le=2027, description="Year we want to analyse."),
+    product: str = Query("ndvi_synth", min_length=1, description="Product to analyse."),
+    bbox: str | None = Query(
+        None,
+        description=(
+            "min_lon,min_lat,max_lon,max_lat in WGS84 degrees, edges inclusive. It may not "
+            "cross the antimeridian. Omit it for every stored point."
+        ),
+        examples=["-1.5,52.0,-0.5,53.0"],
+    ),
+    query_service: QueryService = Depends(get_query_service),
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Stored metrics for every grid point of one product and year, as a GeoJSON
+    FeatureCollection of points ordered by lat then lon. Point coordinates are exactly as
+    stored, so they can be passed back to /point (mode=repo) and /timeseries unchanged.
+    An area with no stored points returns an empty collection.
+    """
+    box = _parse_bbox(bbox)
+    limit = settings.grid_max_features
+
+    # One row past the limit tells a full result from a truncated one.
+    metrics = query_service.get_grid(product=product, year=year, bbox=box, limit=limit + 1)
+    if len(metrics) > limit:
+        raise _bbox_error(
+            bbox or "",
+            f"The request matches more than {limit} points; use a smaller bbox",
+        )
+
+    return PhenologyGridResponse(
+        product=product,
+        year=year,
+        requested_bbox=(box.min_lon, box.min_lat, box.max_lon, box.max_lat) if box else None,
+        features=[
+            GridFeature(
+                geometry=GridPointGeometry(coordinates=(m.location.lon, m.location.lat)),
+                properties=GridPointProperties(
+                    sos_date=m.sos_date,
+                    eos_date=m.eos_date,
+                    season_length=m.season_length,
+                    is_forest=m.is_forest,
+                ),
+            )
+            for m in metrics
+        ],
+    )
+
+
+# Stacks hold float32, so 0.7 arrives as 0.699999988; six decimals is well beyond NDVI precision.
+_NDVI_DECIMALS = 6
+
+
+@router.get("/point/ndvi", response_model=PhenologyNdviCurveResponse)
+def get_point_ndvi_curve(
+    lat: float = Query(..., ge=-90.0, le=90.0, description="Latitude value for the point."),
+    lon: float = Query(..., ge=-180.0, le=180.0, description="Longitude value for the point."),
+    year: int = Query(..., ge=2000, le=2027, description="Year we want to analyse."),
+    product: str = Query("ndvi_synth", min_length=1, description="Product to analyse."),
+    threshold_frac: float = Query(
+        DEFAULT_THRESHOLD_FRAC,
+        gt=0.0,
+        lt=1.0,
+        description="Fraction of the seasonal NDVI amplitude used for SOS/EOS.",
+    ),
+    compute_service: PhenologyComputationService = Depends(get_phenology_compute_service),
+):
+    """
+    The NDVI observations at the pixel nearest the point, with the threshold and the SOS/EOS
+    that mode=compute derives from them. Like mode=compute, a point outside the raster stack
+    returns the 422 out_of_coverage body, and a missing stack returns 404.
+    """
+    location = Location(lat=lat, lon=lon)
+    try:
+        curve = compute_service.compute_point_curve(
+            product=product, year=year, location=location, threshold_frac=threshold_frac
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    return PhenologyNdviCurveResponse(
+        product=product,
+        year=curve.year,
+        location=LocationSchema(lat=lat, lon=lon),
+        pixel=LocationSchema(lat=curve.pixel.lat, lon=curve.pixel.lon),
+        observations=[
+            NdviObservationSchema(
+                doy=doy,
+                date=date(curve.year, 1, 1) + timedelta(days=doy - 1),
+                ndvi=round(ndvi, _NDVI_DECIMALS),
+            )
+            for doy, ndvi in zip(curve.doys, curve.ndvi, strict=True)
+        ],
+        threshold_frac=curve.threshold_frac,
+        threshold_ndvi=(
+            None if curve.threshold_ndvi is None else round(curve.threshold_ndvi, _NDVI_DECIMALS)
+        ),
+        sos_date=curve.sos_date,
+        eos_date=curve.eos_date,
+        season_length=curve.season_length,
     )

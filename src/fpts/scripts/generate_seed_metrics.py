@@ -1,12 +1,35 @@
+"""
+Write the synthetic stored-metrics CSV that docker compose loads into PostGIS.
+
+The values are invented but structured, so maps and charts have something to show:
+- later, shorter seasons further north and on (invented) uplands, longer ones in the
+  maritime west;
+- woodland in patchy clusters, greening earlier and senescing later than open land;
+- a gentle trend towards earlier springs and later autumns;
+- per-year spring anomalies everywhere, and summer droughts strongest in the south-east;
+- a few days of per-point noise.
+Same arguments give the same file, byte for byte.
+"""
+
 from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
-import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+
+from fpts.scripts.synthetic_climate import (
+    FIRST_YEAR,
+    SPRING_ANOMALY_DAYS,
+    SUMMER_DROUGHT_DAYS,
+    clamp,
+    smooth_noise,
+    south_east_weight,
+    stable_u01,
+    upland,
+    woodland,
+)
 
 
 @dataclass(frozen=True)
@@ -17,73 +40,58 @@ class Bounds:
     lat_max: float
 
 
-def _stable_u01(key: str) -> float:
+def is_forest(lat: float, lon: float) -> bool:
     """
-    Deterministic float in [0,1) from a string key (stable across runs/machines).
+    Woodland clusters plus scattered small woods, rarer on uplands.
     """
-    h = hashlib.sha256(key.encode("utf-8")).digest()
-    # take 8 bytes -> int -> scale
-    n = int.from_bytes(h[:8], "big")
-    return (n % (10**12)) / float(10**12)
-
-
-def _clamp(x: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, x))
-
-
-def _is_forest(lat: float, lon: float) -> bool:
-    """
-    Synthetic 'forest likelihood' field with spatial coherence.
-    Tuned to give a mix of True/False across the region.
-    """
-    # Smooth spatial signal
-    signal = (
-        0.55 + 0.25 * math.sin(math.radians(lat * 3.0)) + 0.20 * math.cos(math.radians(lon * 2.0))
+    p = (
+        0.08
+        + 0.75 * woodland(lat, lon)
+        + 0.12 * smooth_noise(lat, lon, "forest")
+        - 0.25 * upland(lat, lon)
     )
-    # Small deterministic "noise"
-    noise = (_stable_u01(f"forest|{lat:.5f}|{lon:.5f}") - 0.5) * 0.20
-    p = _clamp(signal + noise, 0.05, 0.95)
-    u = _stable_u01(f"forest_draw|{lat:.5f}|{lon:.5f}")
-    return u < p
+    return stable_u01(f"forest|{lat:.5f}|{lon:.5f}") < clamp(p, 0.02, 0.95)
 
 
-def _phenology_dates(year: int, lat: float, lon: float, is_forest: bool) -> tuple[date, date, int]:
+def phenology_dates(year: int, lat: float, lon: float, forest: bool) -> tuple[date, date, int]:
     """
-    Generate plausible SOS/EOS with:
-    - latitude effect (higher lat -> later SOS, earlier EOS)
-    - a bit of longitude effect
-    - forest tends to have slightly longer seasons
-    - year-to-year shift
+    SOS, EOS and season length in days for one point and year.
     """
-    # Base day-of-year anchors
-    base_sos = 85  # ~ late March
-    base_eos = 295  # ~ late Oct
+    west = clamp(-(lon + 2.0) / 5.0, -1.0, 1.0)  # maritime west: positive
+    hills = upland(lat, lon)
+    texture = smooth_noise(lat, lon, "season")
+    years_on = year - FIRST_YEAR
 
-    lat_effect = (lat / 90.0) * 35.0  # up to ~35 days shift
-    lon_effect = math.sin(math.radians(lon * 2.0)) * 6.0  # +/- ~6 days
+    sos = (
+        96.0
+        + 2.6 * (lat - 52.0)
+        - 3.0 * west
+        + 14.0 * hills
+        + 3.0 * texture
+        - (4.0 if forest else 0.0)
+        - 0.35 * years_on
+        + SPRING_ANOMALY_DAYS.get(year, 0.0) * (0.8 + 0.2 * smooth_noise(lat, lon, f"spring{year}"))
+        + (stable_u01(f"sos|{year}|{lat:.5f}|{lon:.5f}") - 0.5) * 6.0
+    )
+    eos = (
+        292.0
+        - 2.0 * (lat - 52.0)
+        + 4.0 * west
+        - 10.0 * hills
+        - 2.0 * texture
+        + (6.0 if forest else 0.0)
+        + 0.25 * years_on
+        + SUMMER_DROUGHT_DAYS.get(year, 0.0) * (0.25 + 0.75 * south_east_weight(lat, lon))
+        + (stable_u01(f"eos|{year}|{lat:.5f}|{lon:.5f}") - 0.5) * 6.0
+    )
 
-    forest_bonus = -4.0 if is_forest else 2.0  # forests green-up a bit earlier
-    forest_eos_bonus = 6.0 if is_forest else -3.0  # forests senesce later
+    sos_doy = int(round(clamp(sos, 40.0, 170.0)))
+    eos_doy = int(round(clamp(eos, 220.0, 345.0)))
+    eos_doy = max(eos_doy, sos_doy + 60)
 
-    year_u = _stable_u01(f"yearshift|{year}")
-    year_shift = (year_u - 0.5) * 10.0  # +/- 5 days
-
-    sos_doy = int(round(base_sos + lat_effect + lon_effect + forest_bonus + year_shift))
-    eos_doy = int(round(base_eos - lat_effect + lon_effect + forest_eos_bonus + year_shift))
-
-    # keep sane
-    sos_doy = int(_clamp(sos_doy, 30, 180))
-    eos_doy = int(_clamp(eos_doy, 200, 360))
-
-    # Ensure eos after sos by at least 30 days
-    if eos_doy <= sos_doy + 30:
-        eos_doy = sos_doy + 30
-
-    sos = date(year, 1, 1) + timedelta(days=sos_doy - 1)
-    eos = date(year, 1, 1) + timedelta(days=eos_doy - 1)
-    season_len = (eos - sos).days
-
-    return sos, eos, season_len
+    sos_date = date(year, 1, 1) + timedelta(days=sos_doy - 1)
+    eos_date = date(year, 1, 1) + timedelta(days=eos_doy - 1)
+    return sos_date, eos_date, (eos_date - sos_date).days
 
 
 def generate_points(bounds: Bounds, step_deg: float) -> list[tuple[float, float]]:
@@ -102,7 +110,7 @@ def generate_points(bounds: Bounds, step_deg: float) -> list[tuple[float, float]
     return [(lon, lat) for lat in lats for lon in lons]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="data/seed/phenology_metrics_seed.csv")
     p.add_argument("--product", default="ndvi_synth")
@@ -113,7 +121,7 @@ def main() -> int:
     p.add_argument("--lat-min", type=float, default=88.0)
     p.add_argument("--lat-max", type=float, default=90.0)
     p.add_argument("--step-deg", type=float, default=0.5)
-    args = p.parse_args()
+    args = p.parse_args(argv)
 
     bounds = Bounds(args.lon_min, args.lon_max, args.lat_min, args.lat_max)
     out_path = Path(args.out)
@@ -121,8 +129,12 @@ def main() -> int:
 
     points = generate_points(bounds, args.step_deg)
     years = list(range(args.year_from, args.year_to + 1))
+    # Land cover doesn't change between years.
+    forest_by_point = {(lon, lat): is_forest(lat=lat, lon=lon) for lon, lat in points}
 
-    with out_path.open("w", newline="", encoding="utf-8") as f:
+    # Write to a temporary file first so a crash never leaves a partial CSV behind.
+    tmp_path = out_path.with_suffix(out_path.suffix + ".partial")
+    with tmp_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(
             f,
             fieldnames=[
@@ -140,10 +152,8 @@ def main() -> int:
 
         for year in years:
             for lon, lat in points:
-                forest = _is_forest(lat=lat, lon=lon)
-                sos, eos, season_len = _phenology_dates(
-                    year=year, lat=lat, lon=lon, is_forest=forest
-                )
+                forest = forest_by_point[(lon, lat)]
+                sos, eos, season_len = phenology_dates(year=year, lat=lat, lon=lon, forest=forest)
 
                 w.writerow(
                     {
@@ -157,6 +167,7 @@ def main() -> int:
                         "is_forest": "true" if forest else "false",
                     }
                 )
+    tmp_path.replace(out_path)
 
     n_rows = len(points) * len(years)
     print(f"Wrote {n_rows} rows to {out_path} for product={args.product}")

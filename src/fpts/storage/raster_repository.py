@@ -30,3 +30,17 @@ class RasterRepository(ABC):
         typically one file per time step (e.g. per DOY).
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def list_stack_products(self) -> list[str]:
+        """
+        Return the products that have an NDVI stack for at least one year, sorted.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_stack_years(self, product: str) -> list[int]:
+        """
+        Return the years that have an NDVI stack for the product, sorted.
+        """
+        raise NotImplementedError

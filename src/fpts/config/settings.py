@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     phenology_repo_backend: Literal["memory", "postgis"] = "postgis"
     enable_debug_routes: bool = False
     enable_metrics: bool = False
+    # Largest number of points /phenology/grid returns; larger requests must narrow the bbox.
+    grid_max_features: int = 50_000
 
     # Ingestion for Platery Computer STAC
     pc_stac_url: str = "https://planetarycomputer.microsoft.com/api/stac/v1"

@@ -1,6 +1,6 @@
 from typing import Tuple
 
-from fpts.domain.models import Location, PhenologyMetric
+from fpts.domain.models import BoundingBox, Location, PhenologyMetric, StoredCoverage
 from fpts.storage.phenology_repository import PhenologyRepository
 
 Key = Tuple[str, float, float, int]  # (product, lat, lon, year)
@@ -64,3 +64,38 @@ class InMemoryPhenologyRepository(PhenologyRepository):
     ) -> dict | None:
         # In-memory repo does not do spatial ops; keep it explicit.
         raise NotImplementedError("Area stats require PostGIS backend")
+
+    def get_grid(
+        self,
+        *,
+        product: str,
+        year: int,
+        bbox: BoundingBox | None,
+        limit: int,
+    ) -> list[PhenologyMetric]:
+        items = [
+            metric
+            for (p, _lat, _lon, y), metric in self._store.items()
+            if p == product and y == year and (bbox is None or bbox.contains(metric.location))
+        ]
+        items.sort(key=lambda m: (m.location.lat, m.location.lon))
+        return items[:limit]
+
+    def get_stored_coverage(self) -> dict[str, StoredCoverage]:
+        by_product: dict[str, list[PhenologyMetric]] = {}
+        for (product, _lat, _lon, _year), metric in self._store.items():
+            by_product.setdefault(product, []).append(metric)
+
+        out: dict[str, StoredCoverage] = {}
+        for product, metrics in sorted(by_product.items()):
+            lons = sorted({m.location.lon for m in metrics})
+            lats = [m.location.lat for m in metrics]
+            steps = [b - a for a, b in zip(lons, lons[1:])]
+            out[product] = StoredCoverage(
+                years=tuple(sorted({m.year for m in metrics})),
+                bbox=BoundingBox(
+                    min_lon=lons[0], min_lat=min(lats), max_lon=lons[-1], max_lat=max(lats)
+                ),
+                grid_step_deg=round(min(steps), 6) if steps else None,
+            )
+        return out

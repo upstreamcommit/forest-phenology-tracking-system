@@ -29,3 +29,23 @@ class LocalRasterRepository(RasterRepository):
         if not stack_dir.exists():
             return []
         return sorted(stack_dir.glob("doy_*.tif"))
+
+    def list_stack_products(self) -> list[str]:
+        raw_dir = self._data_dir / "raw"
+        if not raw_dir.is_dir():
+            return []
+        return sorted(
+            d.name
+            for d in raw_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".") and self.list_stack_years(d.name)
+        )
+
+    def list_stack_years(self, product: str) -> list[int]:
+        product_dir = self._data_dir / "raw" / product
+        if not product_dir.is_dir():
+            return []
+        return sorted(
+            int(d.name)
+            for d in product_dir.iterdir()
+            if d.is_dir() and d.name.isdigit() and any(d.glob("doy_*.tif"))
+        )

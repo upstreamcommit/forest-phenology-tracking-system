@@ -6,14 +6,18 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 
-from fpts.domain.models import Location, PhenologyMetric
+from fpts.domain.models import BoundingBox, Location, PhenologyMetric, StoredCoverage
 from fpts.sql.queries.phenology import (
     GET_AREA_STATS,
+    GET_GRID,
     GET_METRIC_FOR_LOCATION,
+    GET_STORED_COVERAGE,
     GET_TIMESERIES_FOR_LOCATION,
     UPSERT_MANY,
 )
 from fpts.storage.phenology_repository import PhenologyRepository
+
+_WHOLE_WORLD = BoundingBox(min_lon=-180.0, min_lat=-90.0, max_lon=180.0, max_lat=90.0)
 
 
 class PostGISPhenologyRepository(PhenologyRepository):
@@ -167,3 +171,65 @@ class PostGISPhenologyRepository(PhenologyRepository):
             out["median_season_length"] = row["median_season_length"]
 
         return out
+
+    def get_grid(
+        self,
+        *,
+        product: str,
+        year: int,
+        bbox: BoundingBox | None,
+        limit: int,
+    ) -> list[PhenologyMetric]:
+        box = bbox or _WHOLE_WORLD
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    GET_GRID,
+                    {
+                        "product": product,
+                        "year": year,
+                        "min_lon": box.min_lon,
+                        "min_lat": box.min_lat,
+                        "max_lon": box.max_lon,
+                        "max_lat": box.max_lat,
+                        "limit": limit,
+                    },
+                )
+                rows = cur.fetchall() or []
+
+        return [
+            PhenologyMetric(
+                year=int(row["year"]),
+                location=Location(lat=float(row["lat"]), lon=float(row["lon"])),
+                sos_date=row["sos_date"],
+                eos_date=row["eos_date"],
+                season_length=row["season_length"],
+                is_forest=row["is_forest"],
+            )
+            for row in rows
+        ]
+
+    def get_stored_coverage(self) -> dict[str, StoredCoverage]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(GET_STORED_COVERAGE)
+                rows = cur.fetchall() or []
+
+        return {
+            row["product"]: StoredCoverage(
+                years=tuple(int(y) for y in row["years"]),
+                bbox=BoundingBox(
+                    min_lon=float(row["min_lon"]),
+                    min_lat=float(row["min_lat"]),
+                    max_lon=float(row["max_lon"]),
+                    max_lat=float(row["max_lat"]),
+                ),
+                grid_step_deg=(
+                    round(float(row["grid_step_deg"]), 6)
+                    if row["grid_step_deg"] is not None
+                    else None
+                ),
+            )
+            for row in rows
+        }

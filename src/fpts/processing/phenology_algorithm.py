@@ -36,14 +36,10 @@ def compute_sos_eos_threshold(
     if not (0.0 < frac < 1.0):
         raise ValueError("frac must be between 0 and 1 (exclusive)")
 
-    ndvi_min = min(ndvi)
-    ndvi_max = max(ndvi)
-
+    threshold = ndvi_threshold(ndvi, frac)
     # Flat signal: no seasonality detectable
-    if ndvi_max == ndvi_min:
+    if threshold is None:
         return PhenologyDates(None, None, None)
-
-    threshold = ndvi_min + frac * (ndvi_max - ndvi_min)
 
     above = [idx for idx, val in enumerate(ndvi) if val >= threshold]
     if not above:
@@ -57,3 +53,17 @@ def compute_sos_eos_threshold(
 
     season_length = eos - sos if eos >= sos else None
     return PhenologyDates(sos, eos, season_length)
+
+
+def ndvi_threshold(ndvi: Sequence[float], frac: float = DEFAULT_THRESHOLD_FRAC) -> Optional[float]:
+    """
+    The NDVI level SOS/EOS are measured against: ndvi_min + frac * (ndvi_max - ndvi_min).
+    None for an empty or flat series, which has no season.
+    """
+    if len(ndvi) == 0:
+        return None
+    ndvi_min = min(ndvi)
+    ndvi_max = max(ndvi)
+    if ndvi_max == ndvi_min:
+        return None
+    return ndvi_min + frac * (ndvi_max - ndvi_min)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from fpts.domain.models import Location, PhenologyMetric
+from fpts.domain.models import BoundingBox, Location, PhenologyMetric, StoredCoverage
 
 
 class PhenologyRepository(ABC):
@@ -55,5 +55,27 @@ class PhenologyRepository(ABC):
         """
         Aggregated stats for points intersecting polygon.
         Returns None if no rows matched.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_grid(
+        self,
+        *,
+        product: str,
+        year: int,
+        bbox: BoundingBox | None,
+        limit: int,
+    ) -> list[PhenologyMetric]:
+        """
+        Return stored metrics for one product and year, inside bbox (edges inclusive) or
+        everywhere when bbox is None. Ordered by lat then lon, at most `limit` rows.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_stored_coverage(self) -> dict[str, StoredCoverage]:
+        """
+        Return the years, extent and grid spacing of stored metrics, keyed by product.
         """
         raise NotImplementedError
