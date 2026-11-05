@@ -6,6 +6,12 @@
 
 const MS_PER_DAY = 86_400_000
 
+/**
+ * A non-leap year for days of year that belong to no one year, such as an average over several
+ * years or a chart's month lines, so they read the same whichever year is selected.
+ */
+export const REFERENCE_YEAR = 2023
+
 /** Parses YYYY-MM-DD as a UTC date, or returns null for anything else. */
 export function parseIsoDate(iso: string): Date | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)

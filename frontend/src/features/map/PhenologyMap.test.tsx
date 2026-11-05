@@ -1,11 +1,12 @@
 import { act, render, screen } from '@testing-library/react'
+import { createRef } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { gridFor } from '../../test/fixtures'
 import { buildColourScale } from './colourScale'
 import { buildCells } from './gridLayer'
 import { CELLS_SOURCE, LAYER_IDS, OVERLAY_COLOURS, selectedFilter } from './mapLayers'
-import { PhenologyMap, type PhenologyMapProps } from './PhenologyMap'
+import { PhenologyMap, type PhenologyMapHandle, type PhenologyMapProps } from './PhenologyMap'
 
 type Handler = (event?: unknown) => void
 
@@ -31,6 +32,13 @@ const { FakeMap } = vi.hoisted(() => {
     setFeatureState = vi.fn()
     easeTo = vi.fn()
     remove = vi.fn()
+    images = new Set<string>()
+    addImage = vi.fn((id: string) => this.images.add(id))
+    hasImage = (id: string) => this.images.has(id)
+    missingImageResolver: ((id: string) => void) | null = null
+    setMissingStyleImageResolver = (resolver: (id: string) => void) => {
+      this.missingImageResolver = resolver
+    }
     touchZoomRotate = { disableRotation: vi.fn() }
     keyboard = { disableRotation: vi.fn() }
 
@@ -38,6 +46,17 @@ const { FakeMap } = vi.hoisted(() => {
       if (FakeMap.failWith) throw FakeMap.failWith
       this.options = options
       FakeMap.instances.push(this)
+      // MapLibre's attribution control, as its constructor adds it with the default options
+      // (compact: true): open, with its toggle button, at every width.
+      const attribution = document.createElement('details')
+      attribution.className =
+        'maplibregl-ctrl maplibregl-ctrl-attrib maplibregl-compact maplibregl-compact-show'
+      attribution.setAttribute('open', '')
+      attribution.innerHTML =
+        '<summary class="maplibregl-ctrl-attrib-button" aria-label="Toggle attribution"></summary>' +
+        '<div class="maplibregl-ctrl-attrib-inner">MapLibre</div>'
+      const container = options.container as HTMLElement
+      container.append(attribution)
     }
 
     on(type: string, layerOrHandler: string | Handler, handler?: Handler) {
@@ -254,6 +273,42 @@ describe('PhenologyMap', () => {
       { diff: false },
     )
     expect(screen.getByText(/basemap could not be loaded/)).toBeInTheDocument()
+  })
+
+  it('leaves the attribution shown on load, as MapLibre opens it, with its button', () => {
+    const { container } = render(<PhenologyMap {...props()} />)
+
+    const attribution = container.querySelector('.maplibregl-ctrl-attrib')
+    expect(attribution).toHaveClass('maplibregl-compact', 'maplibregl-compact-show')
+    expect(attribution).toHaveAttribute('open')
+    expect(screen.getByLabelText('Toggle attribution')).toBeInTheDocument()
+  })
+
+  it('hands out the map canvas, for moving focus to the map', () => {
+    const ref = createRef<PhenologyMapHandle>()
+    const { unmount } = render(<PhenologyMap {...props({ ref })} />)
+    expect(ref.current?.canvas()).toBe(FakeMap.instances[0].canvas)
+
+    unmount()
+    expect(ref.current).toBeNull()
+  })
+
+  it('draws nothing for icons the basemap names but does not have', () => {
+    render(<PhenologyMap {...props()} />)
+    const map = FakeMap.instances[0]
+    const resolve = map.missingImageResolver
+    expect(resolve).not.toBeNull()
+
+    resolve?.('circle-11')
+    expect(map.addImage).toHaveBeenCalledTimes(1)
+    const [id, image] = map.addImage.mock.calls[0] as unknown as [string, ImageData]
+    expect(id).toBe('circle-11')
+    expect([image.width, image.height]).toEqual([1, 1])
+    expect([...image.data]).toEqual([0, 0, 0, 0])
+
+    // An image added meanwhile is not replaced.
+    resolve?.('circle-11')
+    expect(map.addImage).toHaveBeenCalledTimes(1)
   })
 
   it('removes the map on unmount', () => {

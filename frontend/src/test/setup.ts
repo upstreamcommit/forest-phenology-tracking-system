@@ -15,21 +15,25 @@ afterEach(() => {
 afterAll(() => server.close())
 
 // jsdom lacks these browser APIs.
-if (!window.matchMedia) {
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    value: vi.fn((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
-  })
+function defaultMatchMedia(query: string): MediaQueryList {
+  return {
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }
 }
+
+Object.defineProperty(window, 'matchMedia', { writable: true, value: vi.fn(defaultMatchMedia) })
+
+// A test that changes what matchMedia answers must not leak that into the next test.
+afterEach(() => {
+  window.matchMedia = vi.fn(defaultMatchMedia)
+})
 
 if (!globalThis.ResizeObserver) {
   globalThis.ResizeObserver = class {

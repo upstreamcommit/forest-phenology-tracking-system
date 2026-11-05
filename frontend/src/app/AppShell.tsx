@@ -31,8 +31,8 @@ function ApiStatus() {
 
 /** True when any product the API serves is synthetic, so the shell can say so on every page. */
 function useShowsSyntheticData(): boolean {
-  const catalog = useCatalog()
-  return catalog.data?.products.some((p) => p.synthetic === true) ?? false
+  // A catalogue of the wrong shape is a query error (getCatalog checks it), so data is safe here.
+  return useCatalog().data?.products.some((p) => p.synthetic === true) ?? false
 }
 
 /**

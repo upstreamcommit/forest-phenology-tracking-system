@@ -1,24 +1,26 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider } from 'react-router'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { testQueryClient } from '../test/render'
 import { routes } from './router'
 
-// The map page's chunk, held back until a test lets it "download".
-const mapChunk = vi.hoisted(() => {
-  let release: () => void = () => {}
-  const loaded = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  return { loaded, release: () => release() }
-})
+// The map page is mocked, but MapRoute still loads it lazily, so the first render of '/' in this
+// file shows 'Loading the map' for a moment: tests wait for the page with findBy. MapRoute.test.tsx
+// covers the shell while it is still loading.
+const mapPage = vi.hoisted(() => ({ fails: false }))
 
-vi.mock('../features/map/MapExplorerPage', async () => {
-  await mapChunk.loaded
-  return { MapExplorerPage: () => <h1>Phenology map</h1> }
+vi.mock('../features/map/MapExplorerPage', () => ({
+  MapExplorerPage: () => {
+    if (mapPage.fails) throw new Error('The map page broke.')
+    return <h1>Phenology map</h1>
+  },
+}))
+
+afterEach(() => {
+  mapPage.fails = false
 })
 
 function renderApp(route: string) {
@@ -31,24 +33,7 @@ function renderApp(route: string) {
   return router
 }
 
-// The map chunk loads once per file, so the loading test must run first.
 describe('router', () => {
-  it('renders the shell and a loading message while the map page loads', async () => {
-    const warn = vi.spyOn(console, 'warn')
-    renderApp('/')
-
-    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Loading the map')
-    expect(screen.queryByRole('heading', { name: 'Phenology map' })).not.toBeInTheDocument()
-    // The shell asks for the API status without waiting for the map.
-    expect(await screen.findByText('API online')).toBeInTheDocument()
-
-    act(() => mapChunk.release())
-    expect(await screen.findByRole('heading', { level: 1, name: 'Phenology map' })).toBeVisible()
-    expect(screen.queryByText(/Loading the map/)).not.toBeInTheDocument()
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('HydrateFallback'))
-  })
-
   it('titles each page', async () => {
     const router = renderApp('/about')
     expect(document.title).toBe('Data & methods · Forest Phenology Explorer')
@@ -79,5 +64,25 @@ describe('router', () => {
     act(() => mapLink.focus())
     await act(() => router.navigate('/no/such/page?x=1'))
     expect(mapLink).toHaveFocus()
+  })
+
+  it('shows a page that fails inside the shell, keeping the header and navigation', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    mapPage.fails = true
+    const user = userEvent.setup()
+    renderApp('/')
+
+    const main = screen.getByRole('main')
+    expect(await within(main).findByRole('alert')).toHaveTextContent('The map page broke.')
+    expect(
+      within(main).getByRole('heading', { level: 1, name: 'Something went wrong' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(document.title).toBe('Something went wrong · Forest Phenology Explorer')
+
+    // The other pages still work.
+    await user.click(screen.getByRole('link', { name: 'Data & methods' }))
+    expect(screen.getByRole('heading', { level: 1, name: 'Data & methods' })).toHaveFocus()
+    expect(screen.queryByText('The map page broke.')).not.toBeInTheDocument()
   })
 })

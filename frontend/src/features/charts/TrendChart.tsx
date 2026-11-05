@@ -1,4 +1,6 @@
 import {
+  useCallback,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -11,17 +13,17 @@ import {
 
 import type { YearMetric } from '../../api/types'
 import { Button } from '../../components/Button'
-import { dateFromDayOfYear, formatDate, formatDayMonth } from '../../lib/dates'
+import { dateFromDayOfYear, formatDate, formatDayMonth, REFERENCE_YEAR } from '../../lib/dates'
 import { formatDays } from '../../lib/format'
 import { linearScale, MONTH_LABELS, monthTicks } from './scales'
 import {
   averageSeason,
-  REFERENCE_YEAR,
   seasonDays,
   wholeDayAverage,
   yearRange,
   type SeasonDays,
 } from './seasons'
+import { tooltipSide, visibleSpan, type TooltipSide } from './tooltipPlacement'
 import { useElementWidth } from './useElementWidth'
 
 export interface TrendChartProps {
@@ -36,7 +38,15 @@ export interface TrendChartProps {
 }
 
 const HEIGHT = 180
-const MARGIN = { top: 10, right: 8, bottom: 24, left: 34 }
+/**
+ * Room above and below the plot for the tooltip. Every year's hit area spans the plot's full
+ * height, so a tooltip anywhere in the plot would cover other years and take their clicks and taps.
+ * It goes above, or below when a scroll container hides the band above.
+ */
+const TOOLTIP_BAND = 28
+// Tight sides keep each year's target at least 24px wide (WCAG 2.5.8) in the map page's 24rem
+// column, even where a classic scrollbar takes 15px of it.
+const MARGIN = { top: 10, right: 4, bottom: 24, left: 30 }
 const FALLBACK_WIDTH = 480
 /** Days of air above and below the data, so bars don't touch the plot edges. */
 const DOY_PADDING = 10
@@ -75,6 +85,8 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
   const [hoverYear, setHoverYear] = useState<number | null>(null)
   const [focusYear, setFocusYear] = useState<number | null>(null)
   const [tableOpen, setTableOpen] = useState(false)
+  const [side, setSide] = useState<TooltipSide>('above')
+  const plotRef = useRef<HTMLDivElement | null>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const captionId = useId()
   const tableId = useId()
@@ -127,6 +139,31 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
   const highlightInData = rows.some((row) => row.metric.year === highlightYear)
   const hasMissing = rows.some((row) => row.season === null)
 
+  const setPlot = useCallback(
+    (element: HTMLDivElement | null) => {
+      plotRef.current = element
+      return containerRef(element)
+    },
+    [containerRef],
+  )
+  // Picks the band the tooltip can be seen in, when it opens and as anything around it scrolls.
+  const placeTooltip = useCallback(() => {
+    const plot = plotRef.current
+    if (plot) setSide(tooltipSide(plot.getBoundingClientRect(), visibleSpan(plot), TOOLTIP_BAND))
+  }, [])
+  const tooltipOpen = activeRow !== undefined
+  useEffect(() => {
+    if (!tooltipOpen) return
+    // Scroll events don't bubble, but a capturing listener on the window hears every scroller's.
+    const options = { capture: true, passive: true }
+    window.addEventListener('scroll', placeTooltip, options)
+    window.addEventListener('resize', placeTooltip)
+    return () => {
+      window.removeEventListener('scroll', placeTooltip, options)
+      window.removeEventListener('resize', placeTooltip)
+    }
+  }, [tooltipOpen, placeTooltip])
+
   const hideTooltip = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Escape' || activeYear === null) return
     // Escape dismisses the tooltip only, not a panel or dialog around the chart.
@@ -134,6 +171,17 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
     setHoverYear(null)
     setFocusYear(null)
   }
+
+  // A tooltip opened by the pointer alone must close on Escape too, wherever focus is (WCAG
+  // 1.4.13). It stays closed until the pointer enters a year again.
+  useEffect(() => {
+    if (hoverYear === null) return
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setHoverYear(null)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [hoverYear])
 
   return (
     // aria-labelledby repeats the figcaption's implicit naming for tools that don't apply it.
@@ -146,7 +194,11 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
         {onSelectYear ? ' Select a year to show it.' : ''}
       </p>
 
-      <div ref={containerRef} className="relative" style={{ height: HEIGHT }}>
+      <div
+        ref={setPlot}
+        className="relative"
+        style={{ height: HEIGHT, marginTop: TOOLTIP_BAND, marginBottom: TOOLTIP_BAND }}
+      >
         <svg
           aria-hidden="true"
           focusable="false"
@@ -271,14 +323,20 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
             'aria-label': describeYear(row),
             'aria-current': year === highlightYear ? ('true' as const) : undefined,
             style: { left: xCenter(index) - slot / 2, top: 0, width: slot, height: HEIGHT },
-            onMouseEnter: () => setHoverYear(year),
+            onMouseEnter: () => {
+              placeTooltip()
+              setHoverYear(year)
+            },
             onMouseLeave: (event: MouseEvent) => {
-              // Moving onto the tooltip keeps it open, so it can be hovered (WCAG 1.4.13).
+              // Moving up onto the tooltip keeps it open, so it can be hovered (WCAG 1.4.13).
               const to = event.relatedTarget
               if (to instanceof Node && tooltipRef.current?.contains(to)) return
               setHoverYear((current) => (current === year ? null : current))
             },
-            onFocus: () => setFocusYear(year),
+            onFocus: () => {
+              placeTooltip()
+              setFocusYear(year)
+            },
             onBlur: () => setFocusYear((current) => (current === year ? null : current)),
             onKeyDown: hideTooltip,
           }
@@ -300,14 +358,7 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
             ref={tooltipRef}
             row={activeRow}
             onMouseLeave={() => setHoverYear(null)}
-            style={tooltipPosition({
-              cx: xCenter(activeIndex),
-              barWidth,
-              width,
-              mid: activeRow.season
-                ? (y(activeRow.season.sos) + y(activeRow.season.eos)) / 2
-                : (plotTop + plotBottom) / 2,
-            })}
+            style={tooltipPosition(xCenter(activeIndex), width, side)}
           />
         )}
       </div>
@@ -427,21 +478,26 @@ export function TrendChart({ metrics, highlightYear, onSelectYear, title }: Tren
   )
 }
 
-/** Beside the bar, on whichever side has more room, vertically centred on it. */
-function tooltipPosition({
-  cx,
-  barWidth,
-  width,
-  mid,
-}: {
-  cx: number
-  barWidth: number
-  width: number
-  mid: number
-}): CSSProperties {
-  const top = Math.min(Math.max(mid, 40), HEIGHT - 40)
-  const gap = barWidth / 2 + 8
-  return cx > width / 2 ? { right: width - cx + gap, top } : { left: cx + gap, top }
+/**
+ * In the band above or below the plot, its edge on the hit areas' edge, so it covers no year and
+ * the pointer reaches it by moving straight up (or down) from the bar. It is anchored at the bar's
+ * x by the same fraction of its own width as the bar is of the chart's, which keeps it inside the
+ * chart, in line with the bar, whatever its width.
+ */
+function tooltipPosition(cx: number, width: number, side: TooltipSide): CSSProperties {
+  const shift = (100 * cx) / width
+  return {
+    left: cx,
+    [side === 'above' ? 'bottom' : 'top']: HEIGHT,
+    maxWidth: width,
+    transform: `translateX(-${shift}%)`,
+  }
+}
+
+/** A date in the tooltip, without the year when it is the bar's own year. */
+function shortDate(iso: string | null | undefined, year: number): string {
+  if (!iso) return 'no data'
+  return iso.startsWith(`${year}-`) ? formatDayMonth(iso) : formatDate(iso)
 }
 
 function Tooltip({
@@ -455,27 +511,31 @@ function Tooltip({
   style: CSSProperties
   onMouseLeave: () => void
 }) {
-  const { metric } = row
+  const { metric, length } = row
+  // One line, so it fits the band; it wraps (away from the plot) only on a narrow chart.
   return (
     <div
       ref={ref}
       role="tooltip"
       style={style}
       onMouseLeave={onMouseLeave}
-      className="absolute z-10 w-max -translate-y-1/2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-panel"
+      className="absolute z-10 w-max rounded-md border border-line bg-surface px-2.5 py-1 text-xs text-ink tabular-nums shadow-panel"
     >
-      <p className="font-semibold text-ink">{metric.year}</p>
+      <span className="font-semibold">{metric.year}</span>{' '}
       {!metric.sos_date && !metric.eos_date ? (
-        <p className="text-ink-muted">No data for this year</p>
+        <span className="text-ink-muted">No data for this year</span>
       ) : (
-        <dl className="mt-0.5 grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 tabular-nums">
-          <dt className="text-ink-muted">Start</dt>
-          <dd className="text-ink">{dateText(metric.sos_date)}</dd>
-          <dt className="text-ink-muted">End</dt>
-          <dd className="text-ink">{dateText(metric.eos_date)}</dd>
-          <dt className="text-ink-muted">Length</dt>
-          <dd className="text-ink">{row.length === null ? 'No data' : formatDays(row.length)}</dd>
-        </dl>
+        <>
+          <span className="whitespace-nowrap">
+            {shortDate(metric.sos_date, metric.year)} – {shortDate(metric.eos_date, metric.year)}
+          </span>
+          {length !== null && (
+            <>
+              {' '}
+              <span className="whitespace-nowrap">· {formatDays(length)}</span>
+            </>
+          )}
+        </>
       )}
     </div>
   )

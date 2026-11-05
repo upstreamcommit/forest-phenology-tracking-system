@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { useCatalog } from '../../api/queries'
 import type { Product } from '../../api/types'
+import { Button } from '../../components/Button'
 import { PageTitle } from '../../components/PageTitle'
 import { StatusMessage } from '../../components/StatusMessage'
 import { describeError } from '../../lib/errors'
@@ -55,7 +56,11 @@ function DataAvailable() {
   if (catalog.isPending) return <StatusMessage tone="loading" title="Loading the catalogue" />
   if (catalog.isError) {
     return (
-      <StatusMessage tone="error" title="Could not load the catalogue">
+      <StatusMessage
+        tone="error"
+        title="Could not load the catalogue"
+        action={<Button onClick={() => void catalog.refetch()}>Try again</Button>}
+      >
         {describeError(catalog.error)}
       </StatusMessage>
     )

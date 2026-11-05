@@ -1,10 +1,11 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { createMemoryRouter, RouterProvider } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 
+import { queryKeys } from '../api/queries'
 import { catalog } from '../test/fixtures'
 import { renderWithProviders, testQueryClient } from '../test/render'
 import { server } from '../test/server'
@@ -62,6 +63,20 @@ describe('AppShell', () => {
     expect(screen.queryByText(/synthetic/)).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['no product list', { ...catalog, products: undefined }],
+    ['a product list that is not a list', { ...catalog, products: { synthetic: true } }],
+    ['a product that is null', { ...catalog, products: [null] }],
+  ])('keeps the page, with no synthetic warning, when the catalog has %s', async (_, body) => {
+    server.use(http.get('*/catalog', () => HttpResponse.json(body)))
+    const { queryClient } = renderShell('/')
+    // The catalogue's shape is checked, so it arrives as an error rather than as data.
+    await waitFor(() => expect(queryClient.getQueryState(queryKeys.catalog)?.status).toBe('error'))
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
+    expect(screen.getByRole('main')).toBeInTheDocument()
+    expect(screen.queryByText(/synthetic/)).not.toBeInTheDocument()
+  })
+
   it('marks the current page in the navigation with an underline, not only colour', () => {
     renderShell('/')
     const nav = screen.getByRole('navigation', { name: 'Main' })
@@ -107,10 +122,19 @@ describe('AboutPage', () => {
     expect(screen.getByRole('link', { name: '/docs' })).toHaveAttribute('href', '/docs')
   })
 
-  it('reports a catalogue error', async () => {
-    server.use(http.get('*/catalog', () => HttpResponse.json({ detail: 'down' }, { status: 503 })))
+  it('reports a catalogue error, with a retry that recovers', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get('*/catalog', () => HttpResponse.json({ detail: 'down' }, { status: 503 }), {
+        once: true,
+      }),
+    )
     renderWithProviders(<AboutPage />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the catalogue')
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText(/0\.01° pixels/)).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })
 

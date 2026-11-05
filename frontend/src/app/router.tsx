@@ -11,9 +11,15 @@ export const routes: RouteObject[] = [
     element: <AppShell />,
     errorElement: <RouteErrorPage />,
     children: [
-      { index: true, element: <MapRoute /> },
-      { path: 'about', element: <AboutPage /> },
-      { path: '*', element: <NotFoundPage /> },
+      {
+        // A page that fails shows its error inside the shell, so the header and navigation stay.
+        errorElement: <RouteErrorPage />,
+        children: [
+          { index: true, element: <MapRoute /> },
+          { path: 'about', element: <AboutPage /> },
+          { path: '*', element: <NotFoundPage /> },
+        ],
+      },
     ],
   },
 ]

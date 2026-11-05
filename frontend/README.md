@@ -42,8 +42,9 @@ end-to-end browser does too, so a date that slips a day west of Greenwich fails 
 ## Layout
 
 - `src/api/`: `schema.gen.ts` (generated OpenAPI types), `types.ts`, `client.ts` (`fetchJson`
-  and `ApiError`, which turns the API's four error shapes into one `kind`), `endpoints.ts`,
-  `queries.ts` (TanStack Query hooks and keys).
+  and `ApiError`, which turns the API's four error shapes, network failures and unreadable 2xx
+  bodies into one `kind`), `endpoints.ts` (with a shape check on the catalogue, which every page
+  reads), `queries.ts` (TanStack Query hooks and keys).
 - `src/app/`: app, router, shell (header, API status, theme, synthetic-data banner), error and
   404 pages.
 - `src/components/`: small shared UI primitives.

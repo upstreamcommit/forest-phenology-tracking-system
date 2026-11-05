@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { describeError } from '../lib/errors'
 import { server } from '../test/server'
@@ -70,22 +70,15 @@ describe('fetchJson', () => {
   })
 
   it('reports a connection that drops while the body is read as a network failure', async () => {
-    server.use(
-      http.get(
-        '*/catalog',
-        () =>
-          new HttpResponse(
-            new ReadableStream({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode('{"products": ['))
-                controller.error(new TypeError('terminated'))
-              },
-            }),
-            { headers: { 'Content-Type': 'application/json' } },
-          ),
-      ),
-    )
+    // fetch resolves with the headers; only reading the body fails.
+    const response = new Response('{"products": [', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    vi.spyOn(response, 'text').mockRejectedValue(new TypeError('terminated'))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response)
+
     const error = await fetchJson('/catalog').catch((e: unknown) => e)
+    expect(response.text).toHaveBeenCalled()
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ kind: 'network', status: 0 })
     expect(describeError(error)).toBe(
@@ -111,6 +104,23 @@ describe('fetchJson', () => {
 
     server.use(http.get('*/catalog', () => new HttpResponse(null, { status: 200 })))
     await expect(fetchJson('/catalog')).rejects.toMatchObject({ kind: 'http', status: 200 })
+  })
+
+  it("rejects a successful JSON response that fails the caller's shape check", async () => {
+    const hasItems = (body: unknown): body is { items: unknown[] } =>
+      Array.isArray((body as { items?: unknown } | null)?.items)
+    server.use(http.get('*/catalog', () => HttpResponse.json({ items: 'none' }, { status: 203 })))
+    const error = await fetchJson('/catalog', {}, hasItems).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({
+      kind: 'http',
+      status: 203,
+      message: 'Unexpected response from the API.',
+      body: { items: 'none' },
+    })
+
+    server.use(http.get('*/catalog', () => HttpResponse.json({ items: [] })))
+    await expect(fetchJson('/catalog', {}, hasItems)).resolves.toEqual({ items: [] })
   })
 
   it('passes a cancellation through as an AbortError, not an ApiError', async () => {

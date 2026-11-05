@@ -1,4 +1,4 @@
-import { keepPreviousData, QueryClient, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, QueryClient, useQuery, type Query } from '@tanstack/react-query'
 
 import { ApiError } from './client'
 import {
@@ -25,15 +25,23 @@ export function createQueryClient(): QueryClient {
   })
 }
 
+const POINT = 'point'
+const TIMESERIES = 'timeseries'
+
 export const queryKeys = {
   health: ['health'] as const,
   catalog: ['catalog'] as const,
   grid: (product: string, year: number) => ['grid', product, year] as const,
-  point: (q: PointQuery) => ['point', q.product, q.year, q.lat, q.lon] as const,
+  point: (q: PointQuery) => [POINT, q.product, q.year, q.lat, q.lon] as const,
   timeseries: (product: string, lat: number, lon: number, startYear: number, endYear: number) =>
-    ['timeseries', product, lat, lon, startYear, endYear] as const,
+    [TIMESERIES, product, lat, lon, startYear, endYear] as const,
   ndviCurve: (q: PointQuery, thresholdFrac: number | undefined) =>
     ['ndvi-curve', q.product, q.year, q.lat, q.lon, thresholdFrac ?? null] as const,
+}
+
+/** Whether a query is one of the point panel's: a point's stored metric or its season record. */
+export function isPointPanelQuery(query: Query): boolean {
+  return query.queryKey[0] === POINT || query.queryKey[0] === TIMESERIES
 }
 
 export function useHealth() {

@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { dayOfYear } from '../../lib/dates'
 import { timeseriesFor } from '../../test/fixtures'
 import {
   averageSeason,
-  REFERENCE_YEAR,
   seasonDays,
   wholeDayAverage,
   yearRange,
@@ -65,12 +63,6 @@ describe('wholeDayAverage', () => {
       lastYear: 2026,
     }
     expect(wholeDayAverage(average)).toEqual({ sos: 88, eos: 296, length: 208 })
-  })
-})
-
-describe('REFERENCE_YEAR', () => {
-  it('is not a leap year', () => {
-    expect(dayOfYear(`${REFERENCE_YEAR}-12-31`)).toBe(365)
   })
 })
 

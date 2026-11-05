@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { dateFromDayOfYear, dayOfYear, formatDate, formatDayMonth, parseIsoDate } from './dates'
+import {
+  dateFromDayOfYear,
+  dayOfYear,
+  formatDate,
+  formatDayMonth,
+  parseIsoDate,
+  REFERENCE_YEAR,
+} from './dates'
 
 describe('the test time zone', () => {
   it('is west of Greenwich, so local-time date handling would fail these tests', () => {
@@ -65,6 +72,12 @@ describe('dateFromDayOfYear', () => {
     for (const iso of ['2016-01-01', '2020-02-29', '2022-07-15', '2024-12-31']) {
       expect(dateFromDayOfYear(Number(iso.slice(0, 4)), dayOfYear(iso))).toBe(iso)
     }
+  })
+})
+
+describe('REFERENCE_YEAR', () => {
+  it('is not a leap year', () => {
+    expect(dayOfYear(`${REFERENCE_YEAR}-12-31`)).toBe(365)
   })
 })
 

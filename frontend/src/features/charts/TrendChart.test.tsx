@@ -23,6 +23,61 @@ function averageRow() {
     .map((cell) => cell.textContent)
 }
 
+interface Box {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+/** A year's hit area, from its inline style, in the chart's own pixels. */
+function hitArea(element: HTMLElement): Box {
+  const [left, top, width, height] = ['left', 'top', 'width', 'height'].map((side) =>
+    parseFloat(element.style.getPropertyValue(side)),
+  )
+  return { left, right: left + width, top, bottom: top + height }
+}
+
+/**
+ * Where the tooltip lies, from its inline style, if it is `width` by `height` pixels: jsdom has no
+ * layout, and the real size depends on the font.
+ */
+function tooltipBox(tooltip: HTMLElement, width: number, height: number): Box {
+  const { left, top, bottom, maxWidth, transform } = tooltip.style
+  const chartHeight = parseFloat(tooltip.parentElement!.style.height)
+  const shift = Number(/^translateX\((-?[\d.]+)%\)$/.exec(transform)?.[1])
+  const w = Math.min(width, parseFloat(maxWidth))
+  const x = parseFloat(left) + (shift / 100) * w
+  const topEdge = top ? parseFloat(top) : chartHeight - parseFloat(bottom) - height
+  return { left: x, right: x + w, top: topEdge, bottom: topEdge + height }
+}
+
+/** Which band the tooltip is in, from its inline style. */
+function tooltipSide(tooltip: HTMLElement) {
+  const { top, bottom } = tooltip.style
+  if (top && !bottom) return 'below'
+  if (bottom && !top) return 'above'
+  throw new Error(`Tooltip at top ${top}, bottom ${bottom}`)
+}
+
+/**
+ * Lays the chart out in jsdom: every element is `width` wide, the plot (the box that holds the
+ * hit areas) has its top at `plot.top`, and a scroller with overflow-y auto shows `scroller`.
+ */
+function mockLayout(width: number, plot: { top: number }, scroller = { top: 0, height: 0 }) {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    if (this.style.overflowY === 'auto') return new DOMRect(0, scroller.top, width, scroller.height)
+    if (this.style.marginTop) return new DOMRect(0, plot.top, width, 180)
+    return new DOMRect(0, 0, width, 0)
+  })
+}
+
+function overlaps(a: Box, b: Box): boolean {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+}
+
 /** The vertical position of a month's label on the axis. */
 function monthLabelY(container: HTMLElement, month: string) {
   const label = [...container.querySelectorAll('svg text')].find((t) => t.textContent === month)
@@ -30,6 +85,17 @@ function monthLabelY(container: HTMLElement, month: string) {
 }
 
 describe('TrendChart', () => {
+  // 304px is the chart in the map page's 24rem column when a classic scrollbar takes 15px of it.
+  it.each([304, 320])('gives each of 11 years a target at least 24px wide, %ipx wide', (width) => {
+    mockLayout(width, { top: 0 })
+    render(<TrendChart metrics={METRICS} title="Season timing" onSelectYear={() => {}} />)
+    const widths = screen
+      .getAllByRole('button', { name: YEAR_LABEL })
+      .map((bar) => hitArea(bar).right - hitArea(bar).left)
+    expect(widths).toHaveLength(11)
+    for (const w of widths) expect(w).toBeGreaterThanOrEqual(24)
+  })
+
   it('draws one labelled bar per year inside a named figure', () => {
     const { container } = render(
       <TrendChart metrics={METRICS} title="Season timing" onSelectYear={() => {}} />,
@@ -112,11 +178,7 @@ describe('TrendChart', () => {
 
     await user.tab()
     expect(yearBar(2016)).toHaveFocus()
-    const tooltip = screen.getByRole('tooltip')
-    expect(tooltip).toHaveTextContent('2016')
-    expect(tooltip).toHaveTextContent('Start4 Apr 2016')
-    expect(tooltip).toHaveTextContent('End19 Oct 2016')
-    expect(tooltip).toHaveTextContent('Length198 days')
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/^2016 4 Apr – 19 Oct · 198 days$/)
 
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
@@ -132,10 +194,19 @@ describe('TrendChart', () => {
     const user = userEvent.setup()
     render(<TrendChart metrics={METRICS} title="Season timing" />)
     await user.hover(screen.getByRole('img', { name: /^2022:/ }))
-    expect(screen.getByRole('tooltip')).toHaveTextContent(
-      'Start3 Apr 2022End4 Oct 2022Length184 days',
-    )
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/^2022 3 Apr – 4 Oct · 184 days$/)
     await user.unhover(screen.getByRole('img', { name: /^2022:/ }))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  it('closes a tooltip opened by hover alone on Escape, with focus elsewhere', async () => {
+    const user = userEvent.setup()
+    render(<TrendChart metrics={METRICS} title="Season timing" />)
+    await user.hover(screen.getByRole('img', { name: /^2022:/ }))
+    expect(document.activeElement).toBe(document.body)
+    expect(screen.getByRole('tooltip')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
@@ -146,7 +217,7 @@ describe('TrendChart', () => {
     await user.hover(bar)
     const tooltip = screen.getByRole('tooltip')
 
-    // The tooltip lies over other years; moving onto it keeps the year it describes.
+    // Moving onto the tooltip keeps the year it describes.
     fireEvent.mouseOut(bar, { relatedTarget: tooltip })
     expect(screen.getByRole('tooltip')).toBe(tooltip)
     expect(tooltip).toHaveTextContent('2022')
@@ -158,6 +229,144 @@ describe('TrendChart', () => {
       relatedTarget: document.body,
     })
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+  })
+
+  // With the plot's top 100px down the viewport the band above it shows; at 0 it is off screen.
+  it.each([
+    [200, 'above', 100],
+    [320, 'above', 100],
+    [640, 'above', 100],
+    [200, 'below', 0],
+    [320, 'below', 0],
+    [640, 'below', 0],
+  ] as const)(
+    'puts the tooltip in line with its bar, clear of every other year, %ipx wide, %s the plot',
+    (width, side, plotTop) => {
+      mockLayout(width, { top: plotTop })
+      const { container } = render(
+        <TrendChart metrics={METRICS} title="Season timing" onSelectYear={() => {}} />,
+      )
+      const bars = screen.getAllByRole('button', { name: YEAR_LABEL })
+      const areas = bars.map(hitArea)
+      expect(areas.flatMap((a) => Object.values(a)).every(Number.isFinite)).toBe(true)
+      const plot = bars[0].parentElement!
+      expect(container.contains(plot)).toBe(true)
+      const band = {
+        above: parseFloat(plot.style.marginTop),
+        below: parseFloat(plot.style.marginBottom),
+      }
+
+      for (const [index, bar] of bars.entries()) {
+        act(() => bar.focus())
+        const tooltip = screen.getByRole('tooltip')
+        expect(tooltipSide(tooltip)).toBe(side)
+        const own = areas[index]
+        const centre = (own.left + own.right) / 2
+        // One line in a wide chart; wrapped onto three, as wide as the chart, in a narrow one.
+        for (const [w, h] of [
+          [120, 26],
+          [width, 58],
+        ]) {
+          const box = tooltipBox(tooltip, w, h)
+          expect(Object.values(box).every(Number.isFinite)).toBe(true)
+          // Inside the chart, to a hundredth of a pixel (jsdom shortens the numbers in a style).
+          expect(box.left).toBeGreaterThan(-0.01)
+          expect(box.right).toBeLessThan(width + 0.01)
+          // Straight up (or down) from the bar, with no gap to cross on the way.
+          expect(box.left).toBeLessThan(centre)
+          expect(box.right).toBeGreaterThan(centre)
+          if (side === 'above') expect(box.bottom).toBe(own.top)
+          else expect(box.top).toBe(own.bottom)
+          areas.forEach((area, other) => {
+            if (other !== index) expect(overlaps(box, area), `${2016 + other}`).toBe(false)
+          })
+          // A one-line tooltip fits the room kept for it, so it covers nothing around the plot.
+          if (h === 26) {
+            if (side === 'above') expect(box.top).toBeGreaterThanOrEqual(-band.above)
+            else expect(box.bottom).toBeLessThanOrEqual(180 + band.below)
+          }
+        }
+      }
+    },
+  )
+
+  it('moves the tooltip below the plot while a scroll container hides the band above', async () => {
+    const user = userEvent.setup()
+    // The scroller shows 100 to 600px down the viewport.
+    const plot = { top: 300 }
+    mockLayout(400, plot, { top: 100, height: 500 })
+    render(
+      <div data-testid="scroller" style={{ overflowY: 'auto' }}>
+        <TrendChart metrics={METRICS} title="Season timing" />
+      </div>,
+    )
+    const scroller = screen.getByTestId('scroller')
+    Object.defineProperty(scroller, 'clientHeight', { value: 500 })
+    const scroll = (top: number) => {
+      plot.top = top
+      fireEvent.scroll(scroller)
+    }
+
+    await user.hover(screen.getByRole('img', { name: /^2020:/ }))
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('above')
+    // The band above is 28px: 110 leaves 10px of it in view, 128 all of it.
+    scroll(110)
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('below')
+    scroll(128)
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('above')
+    // Scrolled up past the scroller's top, the plot shows only its lower part.
+    scroll(-50)
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('below')
+    await user.unhover(screen.getByRole('img', { name: /^2020:/ }))
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+
+    // Placed when it opens, on focus too, and still closed by Escape.
+    plot.top = 300
+    act(() => screen.getByRole('img', { name: /^2021:/ }).focus())
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('above')
+    act(() => screen.getByRole('img', { name: /^2021:/ }).blur())
+    plot.top = 90
+    act(() => screen.getByRole('img', { name: /^2022:/ }).focus())
+    expect(tooltipSide(screen.getByRole('tooltip'))).toBe('below')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /^2022:/ })).toHaveFocus()
+  })
+
+  it('stops following scrolls once the tooltip closes', () => {
+    const plot = { top: 300 }
+    mockLayout(400, plot)
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    render(<TrendChart metrics={METRICS} title="Season timing" />)
+    const bar = screen.getByRole('img', { name: /^2020:/ })
+    expect(add).not.toHaveBeenCalledWith('scroll', expect.anything(), expect.anything())
+
+    act(() => bar.focus())
+    const [, listener] = add.mock.calls.find(([type]) => type === 'scroll')!
+    act(() => bar.blur())
+    const capturing = expect.objectContaining({ capture: true })
+    expect(remove).toHaveBeenCalledWith('scroll', listener, capturing)
+  })
+
+  it("gives a date the year when it falls outside the bar's year", () => {
+    const metrics: YearMetric[] = [
+      ...METRICS.filter((m) => m.year !== 2017),
+      {
+        year: 2017,
+        is_forest: true,
+        sos_date: '2017-04-03',
+        eos_date: '2018-01-15',
+        season_length: 287,
+      },
+    ]
+    render(<TrendChart metrics={metrics} title="Season timing" onSelectYear={() => {}} />)
+    const tooltip = () => screen.getByRole('tooltip')
+    act(() => yearBar(2017).focus())
+    expect(tooltip()).toHaveTextContent(/^2017 3 Apr – 15 Jan 2018 · 287 days$/)
+    // Dates in the bar's own year still leave it out.
+    act(() => yearBar(2018).focus())
+    expect(tooltip()).toHaveTextContent(/^2018 \d+ [A-Z][a-z]{2} – \d+ [A-Z][a-z]{2} · \d+ days$/)
   })
 
   it('selects a year by click, Enter and Space', async () => {
@@ -262,7 +471,9 @@ describe('TrendChart', () => {
     expect(yearBar(2020)).toHaveAccessibleName('2020: start 3 Apr 2020, end no data')
 
     act(() => yearBar(2019).focus())
-    expect(screen.getByRole('tooltip')).toHaveTextContent('No data for this year')
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/^2019 No data for this year$/)
+    act(() => yearBar(2020).focus())
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/^2020 3 Apr – no data$/)
 
     await user.click(screen.getByRole('button', { name: 'Show data table' }))
     const row = screen.getByRole('row', { name: /^2019/ })

@@ -1,4 +1,4 @@
-import { apiUrl, fetchJson } from './client'
+import { apiUrl, fetchJson, isRecord } from './client'
 import type {
   BBox,
   Catalog,
@@ -21,8 +21,44 @@ export function getHealth(signal?: AbortSignal): Promise<Health> {
   return fetchJson(apiUrl('/health'), { signal })
 }
 
+function isNumberList(value: unknown, length?: number): boolean {
+  return (
+    Array.isArray(value) &&
+    (length === undefined || value.length === length) &&
+    value.every((item) => typeof item === 'number')
+  )
+}
+
+function isCoverage(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    (isRecord(value) && isNumberList(value.years) && isNumberList(value.bbox, 4))
+  )
+}
+
+/**
+ * True when the catalogue has the structure the pages read without further checks: a list of
+ * products, each an object with a string id and, when present, stored and computed coverage with
+ * a list of years and a four-number bbox.
+ */
+export function isCatalog(body: unknown): body is Catalog {
+  return (
+    isRecord(body) &&
+    Array.isArray(body.products) &&
+    body.products.every(
+      (product) =>
+        isRecord(product) &&
+        typeof product.id === 'string' &&
+        isCoverage(product.stored) &&
+        isCoverage(product.computed),
+    )
+  )
+}
+
+/** Every page reads the catalogue, so one of the wrong shape is an error, not a crash. */
 export function getCatalog(signal?: AbortSignal): Promise<Catalog> {
-  return fetchJson(apiUrl('/catalog'), { signal })
+  return fetchJson(apiUrl('/catalog'), { signal }, isCatalog)
 }
 
 export function getGrid(

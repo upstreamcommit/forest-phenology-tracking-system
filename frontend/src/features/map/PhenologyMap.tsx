@@ -13,10 +13,12 @@ import {
   useEffect,
   useEffectEvent,
   useId,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from 'react'
 
 import type { BBox } from '../../api/types'
@@ -43,6 +45,9 @@ setWorkerUrl(workerUrl)
 /** Roughly Great Britain, for when no bounds are known yet. */
 const FALLBACK_CENTER: [number, number] = [-2.5, 54.5]
 
+/** Stands in for icons a basemap style names but its sprite lacks. */
+const BLANK_IMAGE = { width: 1, height: 1, data: new Uint8Array(4) }
+
 export interface PhenologyMapProps {
   /** Cell polygons from buildCells. */
   cells: CellCollection
@@ -61,6 +66,12 @@ export interface PhenologyMapProps {
   label: string
   /** Text alternative: what the map currently shows. */
   description?: string
+  ref?: Ref<PhenologyMapHandle>
+}
+
+export interface PhenologyMapHandle {
+  /** The map's canvas, its tab stop for panning with the keyboard; null without a map. */
+  canvas: () => HTMLElement | null
 }
 
 function failureMessage(error: unknown): string {
@@ -111,6 +122,7 @@ function MapView({
   onSelect,
   label,
   description,
+  ref,
 }: PhenologyMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<MapLibreMap | null>(null)
@@ -118,6 +130,7 @@ function MapView({
   const styleLoaded = useRef(false)
   const [basemapMissing, setBasemapMissing] = useState(false)
   const descriptionId = useId()
+  useImperativeHandle(ref, () => ({ canvas: () => mapRef.current?.getCanvas() ?? null }), [])
 
   const selectedId = useMemo(
     () => (selected ? (findCellAt(cells, selected.lat, selected.lon)?.id ?? null) : null),
@@ -173,6 +186,14 @@ function MapView({
     map.touchZoomRotate.disableRotation()
     map.keyboard.disableRotation()
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right')
+    // MapLibre's attribution is left as it comes: shown on load, as the OpenStreetMap attribution
+    // guidelines ask, and collapsed behind its button once the map is dragged.
+
+    // OpenFreeMap's dark style names an icon its sprite lacks ("circle-11"); draw nothing for it
+    // instead of logging a warning.
+    map.setMissingStyleImageResolver((id) => {
+      if (!map.hasImage(id)) map.addImage(id, BLANK_IMAGE)
+    })
 
     let hoveredId: number | null = null
     let plain = false

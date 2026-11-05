@@ -3,12 +3,6 @@ import { dayOfYear } from '../../lib/dates'
 
 type SeasonFields = Pick<YearMetric, 'year' | 'sos_date' | 'eos_date' | 'season_length'>
 
-/**
- * A non-leap year for showing days of year that belong to no one year, such as an average over
- * several years or the month lines of a chart, so they read the same whichever year is selected.
- */
-export const REFERENCE_YEAR = 2023
-
 /** One season as days of year, so seasons from different years can be compared. */
 export interface SeasonDays {
   year: number

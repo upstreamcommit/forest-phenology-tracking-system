@@ -1,10 +1,13 @@
 /**
- * The one place the app talks HTTP. Every failure becomes an ApiError with a `kind` the UI can
- * branch on, whichever of the API's error bodies came back:
+ * The one place the app talks HTTP. A request or body read that fails (other than a
+ * cancellation, which passes through as it is), an error status, and a 2xx body that is empty,
+ * not JSON, does not parse or fails the caller's shape check each become an ApiError with a `kind`
+ * the UI can branch on. Error statuses are read from whichever of the API's error bodies came back:
  *   {detail: "..."}                               plain HTTPException
  *   {detail: [{type, loc, msg, input, ctx?}]}      validation (FastAPI's shape)
  *   {error: "out_of_coverage", message, ...}       point outside the raster stack
  *   text/plain "Internal Server Error"             unhandled server error
+ * Without a shape check, callers get a parsed 2xx body as the type they asked for, unchecked.
  */
 
 export type ApiErrorKind =
@@ -56,7 +59,7 @@ interface ValidationItem {
   msg?: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
@@ -98,7 +101,11 @@ function isAbort(error: unknown, signal: AbortSignal | null | undefined): boolea
   return signal?.aborted === true || (isRecord(error) && error.name === 'AbortError')
 }
 
-export async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+export async function fetchJson<T>(
+  url: string,
+  init: RequestInit = {},
+  isShape?: (body: unknown) => body is T,
+): Promise<T> {
   let response: Response
   let text: string
   try {
@@ -122,8 +129,9 @@ export async function fetchJson<T>(url: string, init: RequestInit = {}): Promise
   }
 
   if (!response.ok) throw toApiError(response.status, body)
-  // A success that isn't JSON (a proxy's HTML page, say) is not the data the caller asked for.
-  if (!parsed) {
+  // A success that isn't JSON (a proxy's HTML page, say), or isn't shaped like what the caller
+  // asked for, is not the data the caller asked for.
+  if (!parsed || (isShape && !isShape(body))) {
     throw new ApiError('http', response.status, 'Unexpected response from the API.', body)
   }
   return body as T

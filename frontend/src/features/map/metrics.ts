@@ -1,5 +1,5 @@
 import type { GridPointProperties } from '../../api/types'
-import { dateFromDayOfYear, dayOfYear, formatDayMonth } from '../../lib/dates'
+import { dateFromDayOfYear, dayOfYear, formatDayMonth, REFERENCE_YEAR } from '../../lib/dates'
 import { formatDays } from '../../lib/format'
 
 export type MetricKey = 'season_length' | 'sos' | 'eos' | 'forest'
@@ -44,8 +44,6 @@ export const COLOUR_DOMAINS = {
 } as const satisfies Record<string, Domain>
 
 const NO_DATA = 'No data'
-/** A non-leap year, for days of year that have no particular year. */
-export const REFERENCE_YEAR = 2023
 
 function formatDayOfYear(doy: number | null, year = REFERENCE_YEAR): string {
   if (doy === null || !Number.isFinite(doy)) return NO_DATA

@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type Ref } from 'react'
 
 import { Button } from '../../components/Button'
 import { useDraft } from '../../lib/useDraft'
@@ -8,6 +8,8 @@ interface YearSliderProps {
   years: number[]
   value: number
   onChange: (year: number) => void
+  /** The range input, for moving focus to it. */
+  ref?: Ref<HTMLInputElement>
 }
 
 // The end buttons stay focusable when they cannot move further (aria-disabled rather than
@@ -19,7 +21,7 @@ const STEP_BUTTON = 'px-2 aria-disabled:cursor-not-allowed aria-disabled:opacity
  * between years are skipped; the buttons step one stored year at a time. The year shown follows
  * each change at once, while `value` (the URL) catches up.
  */
-export function YearSlider({ years, value, onChange }: YearSliderProps) {
+export function YearSlider({ years, value, onChange, ref }: YearSliderProps) {
   const inputId = useId()
   const [year, setYear] = useDraft(value)
   const index = Math.max(0, years.indexOf(year))
@@ -53,7 +55,9 @@ export function YearSlider({ years, value, onChange }: YearSliderProps) {
         >
           <span aria-hidden="true">‹</span>
         </Button>
+        {/* The scroll margins bring the label, value and end years into view with the track. */}
         <input
+          ref={ref}
           id={inputId}
           type="range"
           min={0}
@@ -62,7 +66,7 @@ export function YearSlider({ years, value, onChange }: YearSliderProps) {
           value={index}
           aria-valuetext={String(year)}
           onChange={(event) => choose(years[Number(event.target.value)])}
-          className="min-w-0 flex-1 accent-accent"
+          className="min-w-0 flex-1 scroll-mt-12 scroll-mb-8 accent-accent"
         />
         <Button
           variant="ghost"
