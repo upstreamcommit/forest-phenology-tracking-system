@@ -78,16 +78,20 @@ class CatalogService:
             paths = self._raster_repo.list_ndvi_stack_paths(product=product, year=year)
             if not paths:
                 continue
-            extent = raster_extent(paths[0])
-            if extent.crs != _SUPPORTED_RASTER_CRS:
+            # One bad stack must not hide the others, so skip it and say why in the log.
+            try:
+                extent = raster_extent(paths[0])
+                if extent.crs != _SUPPORTED_RASTER_CRS:
+                    raise ValueError(f"CRS {extent.crs} is not {_SUPPORTED_RASTER_CRS}")
+                min_x, min_y, max_x, max_y = extent.bounds
+                year_bbox = BoundingBox(min_lon=min_x, min_lat=min_y, max_lon=max_x, max_lat=max_y)
+            except ValueError as e:
                 logger.warning(
                     "catalog_skipped_stack",
-                    extra={"product": product, "year": year, "crs": extent.crs},
+                    extra={"product": product, "year": year, "reason": str(e)},
                 )
                 continue
 
-            min_x, min_y, max_x, max_y = extent.bounds
-            year_bbox = BoundingBox(min_lon=min_x, min_lat=min_y, max_lon=max_x, max_lat=max_y)
             bbox = year_bbox if bbox is None else bbox.union(year_bbox)
             pixel_size = extent.pixel_size[0] if pixel_size is None else pixel_size
             years.append(year)

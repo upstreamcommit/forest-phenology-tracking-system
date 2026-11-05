@@ -96,6 +96,11 @@ class PhenologyTimeseriesResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
 
+# For the response models below: list fields the server always sends (including null ones and
+# GeoJSON "type" constants) as required in OpenAPI, so generated client types match responses.
+_RESPONSE_CONFIG = ConfigDict(frozen=True, json_schema_serialization_defaults_required=True)
+
+
 class StoredCoverageSchema(BaseModel):
     years: list[int]
     bbox: BBox = Field(..., description="[min_lon, min_lat, max_lon, max_lat] of stored points.")
@@ -107,7 +112,7 @@ class StoredCoverageSchema(BaseModel):
         ),
     )
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class ComputedCoverageSchema(BaseModel):
@@ -115,7 +120,7 @@ class ComputedCoverageSchema(BaseModel):
     bbox: BBox = Field(..., description="[min_lon, min_lat, max_lon, max_lat] outer pixel edges.")
     pixel_size_deg: float
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class ProductSchema(BaseModel):
@@ -132,21 +137,21 @@ class ProductSchema(BaseModel):
         None, description="NDVI stacks to compute from (mode=compute, /points, /point/ndvi)."
     )
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class CatalogResponse(BaseModel):
     products: list[ProductSchema]
     default_threshold_frac: float
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class GridPointGeometry(BaseModel):
     type: Literal["Point"] = "Point"
     coordinates: tuple[float, float] = Field(..., description="[lon, lat] exactly as stored.")
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class GridPointProperties(BaseModel):
@@ -155,7 +160,7 @@ class GridPointProperties(BaseModel):
     season_length: Optional[int] = None
     is_forest: bool
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class GridFeature(BaseModel):
@@ -163,7 +168,7 @@ class GridFeature(BaseModel):
     geometry: GridPointGeometry
     properties: GridPointProperties
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class PhenologyGridResponse(BaseModel):
@@ -178,15 +183,15 @@ class PhenologyGridResponse(BaseModel):
     requested_bbox: Optional[BBox] = None
     features: list[GridFeature]
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class NdviObservationSchema(BaseModel):
     doy: int
     date: date
-    ndvi: float
+    ndvi: Optional[float] = Field(..., description="null when the composite has no value.")
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG
 
 
 class PhenologyNdviCurveResponse(BaseModel):
@@ -208,4 +213,4 @@ class PhenologyNdviCurveResponse(BaseModel):
     eos_date: Optional[date] = None
     season_length: Optional[int] = None
 
-    model_config = ConfigDict(frozen=True)
+    model_config = _RESPONSE_CONFIG

@@ -606,22 +606,44 @@ def _grid_metric(year: int, lat: float, lon: float, season_length: int = 180) ->
 
 
 @pytest.mark.integration
-def test_phenology_grid_filters_orders_and_limits_postgis(app_postgis):
+def test_phenology_grid_filters_orders_and_maps_rows_postgis(app_postgis):
     repo = app_postgis.state.phenology_repo
     # Seed-style coordinates: rounded to 6 decimals after float accumulation.
     lons = [round(-0.6 + 0.1 * i, 6) for i in range(4)]
-    lats = [round(51.4 + 0.1 * i, 6) for i in range(3)]
+    lats = [round(51.9 + 0.1 * i, 6) for i in range(3)]  # 51.9, 52.0, 52.1
     repo.upsert_many(
         product="test_product",
-        metrics=[_grid_metric(2020, lat, lon) for lat in lats for lon in lons]
+        metrics=[
+            _grid_metric(2020, lat, lon, season_length=150 + 10 * i)
+            for i, (lat, lon) in enumerate((lat, lon) for lat in lats for lon in lons)
+        ]
         + [_grid_metric(2021, lats[0], lons[0])],
+    )
+    # Another product at the same places must not leak into the answer.
+    repo.upsert_many(
+        product="other_product", metrics=[_grid_metric(2020, lats[0], lon, 99) for lon in lons]
     )
     client = TestClient(app_postgis)
 
     everything = client.get("/phenology/grid", params={"product": "test_product", "year": 2020})
     assert everything.status_code == 200
-    coords = [f["geometry"]["coordinates"] for f in everything.json()["features"]]
-    assert coords == [[lon, lat] for lat in lats for lon in lons]
+    features = everything.json()["features"]
+    assert [f["geometry"]["coordinates"] for f in features] == [
+        [lon, lat] for lat in lats for lon in lons
+    ]
+    assert [f["properties"]["season_length"] for f in features] == [150 + 10 * i for i in range(12)]
+    assert features[0]["properties"] == {
+        "sos_date": "2020-04-01",
+        "eos_date": "2020-08-29",
+        "season_length": 150,
+        "is_forest": False,
+    }
+    assert features[-1]["properties"] == {
+        "sos_date": "2020-04-01",
+        "eos_date": "2020-12-17",
+        "season_length": 260,
+        "is_forest": True,
+    }
 
     # Inclusive edges, on exact stored values.
     box = f"{lons[1]},{lats[1]},{lons[2]},{lats[2]}"
@@ -635,13 +657,29 @@ def test_phenology_grid_filters_orders_and_limits_postgis(app_postgis):
         [lons[2], lats[2]],
     ]
 
-    # Every returned coordinate is an exact repo key.
-    lon, lat = coords[5]
-    point = client.get(
-        "/phenology/point",
-        params={"product": "test_product", "year": 2020, "lat": lat, "lon": lon},
+
+@pytest.mark.integration
+def test_phenology_grid_coordinates_round_trip_bit_for_bit_postgis(app_postgis):
+    awkward = Location(lat=51.123456789012, lon=-0.30000000000000004)
+    app_postgis.state.phenology_repo.upsert(
+        product="test_product", metric=_grid_metric(2020, awkward.lat, awkward.lon)
     )
-    assert point.status_code == 200
+    client = TestClient(app_postgis)
+
+    [feature] = client.get(
+        "/phenology/grid", params={"product": "test_product", "year": 2020}
+    ).json()["features"]
+    lon, lat = feature["geometry"]["coordinates"]
+
+    assert (lon, lat) == (awkward.lon, awkward.lat)
+    params = {"product": "test_product", "lat": lat, "lon": lon}
+    assert client.get("/phenology/point", params={**params, "year": 2020}).status_code == 200
+    assert (
+        client.get(
+            "/phenology/timeseries", params={**params, "start_year": 2020, "end_year": 2020}
+        ).status_code
+        == 200
+    )
 
 
 @pytest.mark.integration
@@ -655,15 +693,22 @@ def test_phenology_grid_rejects_more_points_than_the_limit_postgis(postgis_dsn):
         product="test_product",
         metrics=[_grid_metric(2020, 51.5, lon) for lon in (-0.3, -0.2, -0.1)],
     )
+    client = TestClient(app)
 
-    resp = TestClient(app).get("/phenology/grid", params={"product": "test_product", "year": 2020})
-
+    resp = client.get("/phenology/grid", params={"product": "test_product", "year": 2020})
     assert resp.status_code == 422
-    assert resp.json()["detail"][0]["loc"] == ["query", "bbox"]
+    [error] = resp.json()["detail"]
+    assert (error["type"], error["ctx"]) == ("too_many_features", {"limit": 2})
+
+    two = client.get(
+        "/phenology/grid",
+        params={"product": "test_product", "year": 2020, "bbox": "-0.3,51.5,-0.2,51.5"},
+    )
+    assert len(two.json()["features"]) == 2
 
 
 @pytest.mark.integration
-def test_catalog_reports_stored_coverage_postgis(app_postgis):
+def test_catalog_reports_stored_coverage_per_product_postgis(app_postgis):
     repo = app_postgis.state.phenology_repo
     lons = [round(-7.5 + 0.1 * i, 6) for i in range(5)]
     for year in (2016, 2017):
@@ -671,12 +716,24 @@ def test_catalog_reports_stored_coverage_postgis(app_postgis):
             product="test_product",
             metrics=[_grid_metric(year, lat, lon) for lat in (49.5, 49.6) for lon in lons],
         )
+    # One longitude only, and longitudes that differ only by float noise: no step for either,
+    # and neither may borrow another product's step.
+    repo.upsert_many(
+        product="one_lon", metrics=[_grid_metric(2020, lat, 3.0) for lat in (10.0, 10.5)]
+    )
+    repo.upsert_many(
+        product="noisy",
+        metrics=[_grid_metric(2020, 10.0, 0.3), _grid_metric(2020, 10.1, 0.30000000000000004)],
+    )
 
     resp = TestClient(app_postgis).get("/catalog")
 
     assert resp.status_code == 200
-    [product] = [p for p in resp.json()["products"] if p["id"] == "test_product"]
+    products = {p["id"]: p for p in resp.json()["products"]}
+    product = products["test_product"]
     assert product["stored"]["years"] == [2016, 2017]
     assert product["stored"]["bbox"] == [lons[0], 49.5, lons[-1], 49.6]
     assert product["stored"]["grid_step_deg"] == pytest.approx(0.1)
     assert product["synthetic"] is None
+    assert products["one_lon"]["stored"]["grid_step_deg"] is None
+    assert products["noisy"]["stored"]["grid_step_deg"] is None

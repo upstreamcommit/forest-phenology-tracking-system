@@ -15,7 +15,12 @@ from fpts.query.catalog import CatalogService
 router = APIRouter(tags=["catalog"])
 
 
-def _bbox(box: BoundingBox) -> BBox:
+def _stored_bbox(box: BoundingBox) -> BBox:
+    # Exact stored coordinates, unrounded, so the box can be passed to /phenology/grid as is.
+    return (box.min_lon, box.min_lat, box.max_lon, box.max_lat)
+
+
+def _raster_bbox(box: BoundingBox) -> BBox:
     # Raster bounds come from affine maths, so trim float noise such as 51.400000000000006.
     return (
         round(box.min_lon, 9),
@@ -45,7 +50,7 @@ def get_catalog(catalog_service: CatalogService = Depends(get_catalog_service)):
                 stored=(
                     StoredCoverageSchema(
                         years=list(stored.years),
-                        bbox=_bbox(stored.bbox),
+                        bbox=_stored_bbox(stored.bbox),
                         grid_step_deg=stored.grid_step_deg,
                     )
                     if stored is not None
@@ -54,7 +59,7 @@ def get_catalog(catalog_service: CatalogService = Depends(get_catalog_service)):
                 computed=(
                     ComputedCoverageSchema(
                         years=list(computed.years),
-                        bbox=_bbox(computed.bbox),
+                        bbox=_raster_bbox(computed.bbox),
                         pixel_size_deg=round(computed.pixel_size_deg, 9),
                     )
                     if computed is not None

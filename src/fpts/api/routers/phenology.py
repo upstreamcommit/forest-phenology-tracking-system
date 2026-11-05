@@ -1,3 +1,4 @@
+import math
 from datetime import date, timedelta
 from typing import Literal
 
@@ -303,11 +304,14 @@ def get_area_phenology_stats(
     )
 
 
-def _bbox_error(bbox: str, msg: str) -> RequestValidationError:
+def _bbox_error(
+    bbox: str | None, msg: str, *, error_type: str = "value_error", ctx: dict | None = None
+) -> RequestValidationError:
     # Same 422 body as FastAPI's own parameter validation, which OpenAPI documents.
-    return RequestValidationError(
-        [{"type": "value_error", "loc": ("query", "bbox"), "msg": msg, "input": bbox}]
-    )
+    error: dict = {"type": error_type, "loc": ("query", "bbox"), "msg": msg, "input": bbox}
+    if ctx is not None:
+        error["ctx"] = ctx
+    return RequestValidationError([error])
 
 
 def _parse_bbox(bbox: str | None) -> BoundingBox | None:
@@ -331,7 +335,8 @@ def get_phenology_grid(
         None,
         description=(
             "min_lon,min_lat,max_lon,max_lat in WGS84 degrees, edges inclusive. It may not "
-            "cross the antimeridian. Omit it for every stored point."
+            "cross the antimeridian, so clamp web-map bounds to [-180, 180] first. Omit it for "
+            "every stored point."
         ),
         examples=["-1.5,52.0,-0.5,53.0"],
     ),
@@ -351,8 +356,10 @@ def get_phenology_grid(
     metrics = query_service.get_grid(product=product, year=year, bbox=box, limit=limit + 1)
     if len(metrics) > limit:
         raise _bbox_error(
-            bbox or "",
+            bbox,
             f"The request matches more than {limit} points; use a smaller bbox",
+            error_type="too_many_features",
+            ctx={"limit": limit},
         )
 
     return PhenologyGridResponse(
@@ -376,9 +383,20 @@ def get_phenology_grid(
 
 # Stacks hold float32, so 0.7 arrives as 0.699999988; six decimals is well beyond NDVI precision.
 _NDVI_DECIMALS = 6
+# Pixel centres come from affine maths (51.404999999999994); nine decimals is about 0.1 mm.
+_COORD_DECIMALS = 9
 
 
-@router.get("/point/ndvi", response_model=PhenologyNdviCurveResponse)
+def _ndvi(value: float) -> float | None:
+    # A composite without a value (NaN) is null rather than an invalid JSON number.
+    return round(value, _NDVI_DECIMALS) if math.isfinite(value) else None
+
+
+@router.get(
+    "/point/ndvi",
+    response_model=PhenologyNdviCurveResponse,
+    responses={404: {"description": "No raster stack for this product and year"}},
+)
 def get_point_ndvi_curve(
     lat: float = Query(..., ge=-90.0, le=90.0, description="Latitude value for the point."),
     lon: float = Query(..., ge=-180.0, le=180.0, description="Longitude value for the point."),
@@ -409,19 +427,19 @@ def get_point_ndvi_curve(
         product=product,
         year=curve.year,
         location=LocationSchema(lat=lat, lon=lon),
-        pixel=LocationSchema(lat=curve.pixel.lat, lon=curve.pixel.lon),
+        pixel=LocationSchema(
+            lat=round(curve.pixel.lat, _COORD_DECIMALS), lon=round(curve.pixel.lon, _COORD_DECIMALS)
+        ),
         observations=[
             NdviObservationSchema(
                 doy=doy,
                 date=date(curve.year, 1, 1) + timedelta(days=doy - 1),
-                ndvi=round(ndvi, _NDVI_DECIMALS),
+                ndvi=_ndvi(ndvi),
             )
             for doy, ndvi in zip(curve.doys, curve.ndvi, strict=True)
         ],
         threshold_frac=curve.threshold_frac,
-        threshold_ndvi=(
-            None if curve.threshold_ndvi is None else round(curve.threshold_ndvi, _NDVI_DECIMALS)
-        ),
+        threshold_ndvi=None if curve.threshold_ndvi is None else _ndvi(curve.threshold_ndvi),
         sos_date=curve.sos_date,
         eos_date=curve.eos_date,
         season_length=curve.season_length,

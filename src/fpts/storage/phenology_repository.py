@@ -5,6 +5,9 @@ from typing import Optional
 
 from fpts.domain.models import BoundingBox, Location, PhenologyMetric, StoredCoverage
 
+# Longitude gaps smaller than this are float noise, not grid spacing.
+MIN_GRID_STEP_DEG = 1e-9
+
 
 class PhenologyRepository(ABC):
     """

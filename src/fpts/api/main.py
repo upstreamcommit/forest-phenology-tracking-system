@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
 from fpts.api.routers.catalog import router as catalog_router
 from fpts.api.routers.debug import router as debug_router
@@ -42,6 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(phenology_router)
 
     app.add_middleware(RequestLoggingMiddleware)
+    # A year of the grid is about 1.6 MB of JSON and compresses about 25-fold.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     if settings.enable_metrics:
         app.add_middleware(PrometheusMetricsMiddleware)

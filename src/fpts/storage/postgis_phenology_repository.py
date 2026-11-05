@@ -15,7 +15,7 @@ from fpts.sql.queries.phenology import (
     GET_TIMESERIES_FOR_LOCATION,
     UPSERT_MANY,
 )
-from fpts.storage.phenology_repository import PhenologyRepository
+from fpts.storage.phenology_repository import MIN_GRID_STEP_DEG, PhenologyRepository
 
 _WHOLE_WORLD = BoundingBox(min_lon=-180.0, min_lat=-90.0, max_lon=180.0, max_lat=90.0)
 
@@ -213,7 +213,7 @@ class PostGISPhenologyRepository(PhenologyRepository):
     def get_stored_coverage(self) -> dict[str, StoredCoverage]:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(GET_STORED_COVERAGE)
+                cur.execute(GET_STORED_COVERAGE, {"min_step": MIN_GRID_STEP_DEG})
                 rows = cur.fetchall() or []
 
         return {

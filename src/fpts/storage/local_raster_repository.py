@@ -1,7 +1,11 @@
+import re
 from pathlib import Path
 from typing import Sequence
 
 from fpts.storage.raster_repository import RasterRepository
+
+# ASCII digits only: str.isdigit() also accepts characters such as "²" that int() rejects.
+_YEAR_DIR = re.compile(r"[0-9]{4}")
 
 
 class LocalRasterRepository(RasterRepository):
@@ -47,5 +51,5 @@ class LocalRasterRepository(RasterRepository):
         return sorted(
             int(d.name)
             for d in product_dir.iterdir()
-            if d.is_dir() and d.name.isdigit() and any(d.glob("doy_*.tif"))
+            if d.is_dir() and _YEAR_DIR.fullmatch(d.name) and any(d.glob("doy_*.tif"))
         )

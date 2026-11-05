@@ -1,7 +1,7 @@
 from typing import Tuple
 
 from fpts.domain.models import BoundingBox, Location, PhenologyMetric, StoredCoverage
-from fpts.storage.phenology_repository import PhenologyRepository
+from fpts.storage.phenology_repository import MIN_GRID_STEP_DEG, PhenologyRepository
 
 Key = Tuple[str, float, float, int]  # (product, lat, lon, year)
 
@@ -90,7 +90,8 @@ class InMemoryPhenologyRepository(PhenologyRepository):
         for product, metrics in sorted(by_product.items()):
             lons = sorted({m.location.lon for m in metrics})
             lats = [m.location.lat for m in metrics]
-            steps = [b - a for a, b in zip(lons, lons[1:])]
+            # Gaps below MIN_GRID_STEP_DEG are float noise between "equal" longitudes.
+            steps = [b - a for a, b in zip(lons, lons[1:]) if b - a > MIN_GRID_STEP_DEG]
             out[product] = StoredCoverage(
                 years=tuple(sorted({m.year for m in metrics})),
                 bbox=BoundingBox(

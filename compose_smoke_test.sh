@@ -80,23 +80,34 @@ check 200 "health" "$BASE_URL/health"
 
 # README examples
 check 200 "point, repo" "$P/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo"
-check 200 "point, compute" "$P/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=compute"
+check 200 "point, compute" "$P/point?product=ndvi_synth&year=2020&lat=51.47&lon=-0.43&mode=compute"
 check 200 "timeseries" "$P/timeseries?product=ndvi_synth&lat=52.5&lon=-1.0&start_year=2018&end_year=2022"
 check 200 "area" -X POST \
   "$P/area?year=2024&product=ndvi_synth&min_season_length=180&season_length_stat=mean" \
   -H "Content-Type: application/json" \
   -d '{"geometry":{"type":"Polygon","coordinates":[[[-1.5,52.0],[-0.5,52.0],[-0.5,53.0],[-1.5,53.0],[-1.5,52.0]]]}}'
+check 200 "grid" "$P/grid?product=ndvi_synth&year=2022&bbox=-0.6,51.4,-0.4,51.6"
+check 200 "point ndvi curve" "$P/point/ndvi?product=ndvi_synth&year=2021&lat=51.5&lon=-0.5"
+check 200 "catalog" "$BASE_URL/catalog"
+
+# Stored grid points inside the raster stack (lon -1.0..0.0, lat 51.0..52.0) have both sources.
+check 200 "point, compute at a stored grid point" \
+  "$P/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=compute"
+check 422 "grid, bbox crossing the antimeridian" \
+  "$P/grid?product=ndvi_synth&year=2022&bbox=179,51,-179,52"
+check 404 "point ndvi, year without a raster stack" \
+  "$P/point/ndvi?product=ndvi_synth&year=2015&lat=51.5&lon=-0.5"
 
 # Raster-backed paths that need the data volume mounted correctly
 check 200 "point, auto falls back to compute" \
-  "$P/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=auto"
+  "$P/point?product=ndvi_synth&year=2020&lat=51.47&lon=-0.43&mode=auto"
 check 200 "points, compute" -X POST "$P/points?year=2020&product=ndvi_synth" \
-  -H "Content-Type: application/json" -d '{"locations":[{"lat":51.495,"lon":-0.495}]}'
+  -H "Content-Type: application/json" -d '{"locations":[{"lat":51.47,"lon":-0.43}]}'
 
 # Repo and compute results are cached separately, so neither mode may answer for the other.
-# The compute cache is warm for this pixel centre after the checks above.
+# The compute cache is warm for this off-grid pixel centre after the checks above.
 check 404 "point, repo is not answered from the compute cache" \
-  "$P/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=repo"
+  "$P/point?product=ndvi_synth&year=2020&lat=51.47&lon=-0.43&mode=repo"
 check 200 "point, repo on the seed grid" "$P/point?product=ndvi_synth&year=2020&lat=52.5&lon=-1.0&mode=repo"
 check 422 "point, compute is not answered from the repo cache (out of raster coverage)" \
   "$P/point?product=ndvi_synth&year=2020&lat=52.5&lon=-1.0&mode=compute"

@@ -122,7 +122,7 @@ lon_steps AS (
         SELECT product, lon - LAG(lon) OVER (PARTITION BY product ORDER BY lon) AS step
         FROM (SELECT DISTINCT product, lon FROM phenology_metrics) AS distinct_lons
     ) AS steps
-    WHERE step > 0
+    WHERE step > %(min_step)s
     GROUP BY product
 )
 SELECT

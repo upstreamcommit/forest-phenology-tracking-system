@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 import rasterio
+import rasterio.errors
 import rioxarray
 import xarray as xr
 
@@ -13,6 +14,8 @@ from fpts.domain.errors import OutOfCoverageError
 from fpts.domain.models import Location
 
 _DOY_RE = re.compile(r"doy_(\d{3})\.tif$")
+# Far below any pixel size, far above float noise in coordinates near 1e2 degrees (~1e-14).
+_EDGE_SLACK_DEG = 1e-9
 
 
 @dataclass(frozen=True)
@@ -35,14 +38,18 @@ class RasterExtent:
 def raster_extent(path: Path) -> RasterExtent:
     """
     Read a GeoTIFF's CRS, outer bounds and pixel size from its header (no pixel data).
+    Raises ValueError when the file can't be read as a raster.
     """
-    with rasterio.open(path) as src:
-        b = src.bounds
-        return RasterExtent(
-            crs=src.crs.to_string() if src.crs else None,
-            bounds=(b.left, b.bottom, b.right, b.top),
-            pixel_size=(abs(src.res[0]), abs(src.res[1])),
-        )
+    try:
+        with rasterio.open(path) as src:
+            b = src.bounds
+            return RasterExtent(
+                crs=src.crs.to_string() if src.crs else None,
+                bounds=(b.left, b.bottom, b.right, b.top),
+                pixel_size=(abs(src.res[0]), abs(src.res[1])),
+            )
+    except rasterio.errors.RasterioError as e:
+        raise ValueError(f"Unreadable raster {path.name}: {e}") from e
 
 
 def _doy_from_filename(path: Path) -> int:
@@ -86,7 +93,9 @@ def extract_ndvi_timeseries(
             x=location.lon,
             y=location.lat,
             method="nearest",
-            tolerance=tolerance_deg,
+            # A point on the outer edge is exactly one tolerance from the edge pixel's centre;
+            # without the slack, float noise in the pixel coordinates rejects some edges.
+            tolerance=tolerance_deg + _EDGE_SLACK_DEG,
         )
     except KeyError as e:
         raise OutOfCoverageError(

@@ -1,13 +1,18 @@
 """
-Shared ingredients for the synthetic demo data: deterministic noise, smooth spatial fields and
-per-year anomalies. Everything here is invented to look plausible on a map of Great Britain
-and Ireland; none of it is derived from observations.
+The invented seasonal model behind the synthetic demo data, shared by the stored-metrics CSV
+(generate_seed_metrics.py) and the NDVI raster stacks (make_synthetic_ndvi_stack.py), so the two
+roughly agree where they overlap.
+
+It covers a plain lon/lat rectangle around Great Britain, so sea points get seasons too. Uplands
+and woodland clusters are placed loosely where real ones are, but nothing here is derived from
+observations.
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+from functools import lru_cache
 
 FIRST_YEAR = 2016
 
@@ -52,7 +57,6 @@ _UPLANDS: tuple[tuple[float, float, float], ...] = (
     (52.7, -3.7, 0.55),
     (50.6, -3.9, 0.3),
     (53.4, -1.8, 0.3),
-    (52.0, -9.5, 0.6),
 )
 
 # (lat, lon, radius in degrees) of invented woodland clusters.
@@ -68,7 +72,6 @@ _WOODLANDS: tuple[tuple[float, float, float], ...] = (
     (53.2, -1.1, 0.3),
     (52.3, -3.0, 0.35),
     (54.3, -6.5, 0.35),
-    (52.8, -7.6, 0.4),
 )
 
 
@@ -112,17 +115,28 @@ def woodland(lat: float, lon: float) -> float:
     return _bumps(lat, lon, _WOODLANDS)
 
 
+_WAVES = ((1.7, 0.9), (0.8, 2.3), (3.1, 1.4))
+
+
+@lru_cache(maxsize=None)
+def _phases(seed: str) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        (
+            stable_u01(f"{seed}|a|{i}") * 2.0 * math.pi,
+            stable_u01(f"{seed}|b|{i}") * 2.0 * math.pi,
+        )
+        for i in range(len(_WAVES))
+    )
+
+
 def smooth_noise(lat: float, lon: float, seed: str) -> float:
     """
     A smooth field in about [-1, 1] made from a few sinusoids with seeded phases.
     """
     total = 0.0
-    waves = ((1.7, 0.9), (0.8, 2.3), (3.1, 1.4))
-    for i, (f_lat, f_lon) in enumerate(waves):
-        phase_a = stable_u01(f"{seed}|a|{i}") * 2.0 * math.pi
-        phase_b = stable_u01(f"{seed}|b|{i}") * 2.0 * math.pi
+    for (f_lat, f_lon), (phase_a, phase_b) in zip(_WAVES, _phases(seed), strict=True):
         total += math.sin(f_lat * lat + phase_a) * math.cos(f_lon * lon + phase_b)
-    return total / len(waves)
+    return total / len(_WAVES)
 
 
 def south_east_weight(lat: float, lon: float) -> float:
@@ -130,3 +144,55 @@ def south_east_weight(lat: float, lon: float) -> float:
     0 in the north-west to 1 in the south-east, for anomalies that are strongest there.
     """
     return clamp(0.5 + ((52.5 - lat) / 3.0 + (lon + 1.5) / 3.5) / 2.0, 0.0, 1.0)
+
+
+def is_forest(lat: float, lon: float) -> bool:
+    """
+    Woodland clusters plus scattered small woods, rarer on uplands. Constant across years.
+    """
+    p = (
+        0.08
+        + 0.75 * woodland(lat, lon)
+        + 0.12 * smooth_noise(lat, lon, "forest")
+        - 0.25 * upland(lat, lon)
+    )
+    return stable_u01(f"forest|{lat:.5f}|{lon:.5f}") < clamp(p, 0.02, 0.95)
+
+
+def season_doys(year: int, lat: float, lon: float, forest: bool) -> tuple[float, float]:
+    """
+    Unrounded start and end of season (day of year) for one point and year:
+    - later, shorter seasons further north and on uplands, longer ones in the maritime west;
+    - woodland greening earlier and senescing later than open land;
+    - a gentle trend towards earlier springs and later autumns;
+    - per-year spring anomalies everywhere, and summer droughts strongest in the south-east;
+    - a few days of per-point noise.
+    """
+    west = clamp(-(lon + 2.0) / 5.0, -1.0, 1.0)  # maritime west: positive
+    hills = upland(lat, lon)
+    texture = smooth_noise(lat, lon, "season")
+    years_on = year - FIRST_YEAR
+
+    sos = (
+        96.0
+        + 2.6 * (lat - 52.0)
+        - 3.0 * west
+        + 14.0 * hills
+        + 3.0 * texture
+        - (4.0 if forest else 0.0)
+        - 0.35 * years_on
+        + SPRING_ANOMALY_DAYS.get(year, 0.0) * (0.8 + 0.2 * smooth_noise(lat, lon, f"spring{year}"))
+        + (stable_u01(f"sos|{year}|{lat:.5f}|{lon:.5f}") - 0.5) * 6.0
+    )
+    eos = (
+        292.0
+        - 2.0 * (lat - 52.0)
+        + 4.0 * west
+        - 10.0 * hills
+        - 2.0 * texture
+        + (6.0 if forest else 0.0)
+        + 0.25 * years_on
+        + SUMMER_DROUGHT_DAYS.get(year, 0.0) * (0.25 + 0.75 * south_east_weight(lat, lon))
+        + (stable_u01(f"eos|{year}|{lat:.5f}|{lon:.5f}") - 0.5) * 6.0
+    )
+    return sos, eos

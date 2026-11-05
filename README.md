@@ -65,7 +65,7 @@ src/fpts/
 
 API Layer - Request validation - Response schemas - HTTP error mapping
 
-Application Layer - QueryService orchestrates read operations
+Application Layer - QueryService orchestrates read operations, and CatalogService reports which products, years and extents exist
 
 Storage Layer - PhenologyRepository (abstract) -
 PostGISPhenologyRepository (default production backend)
@@ -95,19 +95,26 @@ Behaviour:
 
 The two modes read different synthetic datasets (`GET /catalog` reports both):
 - **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`; `/phenology/grid` returns them exactly as stored.
-- **Raster stack (`mode=compute`)**: a 10x10 NDVI stack per year for 2016-2026, 23 composites every 16 days, covering lon -0.5 to -0.4 and lat 51.4 to 51.5 at 0.01°. Any point strictly inside a pixel works; pixel centres such as `lat=51.495&lon=-0.495` are safest. Points exactly on a pixel edge (multiples of 0.01°, such as `51.45,-0.45`) may currently be rejected as out of coverage.
+- **Raster stack (`mode=compute`)**: a 101x101 NDVI stack per year for 2016-2026, 23 composites every 16 days, with pixel centres on every 0.01° from lon -1.0 to 0.0 and lat 51.0 to 52.0. Any point within half a pixel of a centre works, including the outer edges.
 
-Both datasets are invented, not observations, but structured so maps and charts show something:
-seasons start later and end earlier further north and on invented uplands, woodland sits in
-patchy clusters, springs drift slightly earlier each year, and some years have early or late
-springs or summer droughts that hit the south-east hardest (for example 2018 and 2022).
+The 121 stored grid points inside that square (such as `lat=51.5&lon=-0.5`) are also pixel
+centres, so they have both stored metrics and a computed season and NDVI curve; `mode=auto`
+returns the stored row there. Elsewhere only one source answers: `lat=52.5&lon=-1.0` is
+stored only, and off-grid pixel centres such as `lat=51.47&lon=-0.43` are computed only.
+
+Both datasets are invented, not observations, but come from one seasonal model so maps and
+charts show something and the two roughly agree: seasons start later and end earlier further
+north and on invented uplands, woodland sits in patchy clusters, springs drift slightly earlier
+each year, and some years have early or late springs or summer droughts that hit the south-east
+hardest (for example 2018 and 2022). Computed start and end dates land on composite days, so
+they differ from the stored dates at the same point by up to about one composite (16 days).
 
 Sample queries
 ```bash
 curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo"
 ```
 ```bash
-curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=compute"
+curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.47&lon=-0.43&mode=compute"
 ```
 
 ------------------------------------------------------------------------
@@ -205,7 +212,7 @@ Behavior:
 
 Sample query
 ```bash
-curl "http://localhost:8000/phenology/point/ndvi?product=ndvi_synth&year=2021&lat=51.455&lon=-0.445"
+curl "http://localhost:8000/phenology/point/ndvi?product=ndvi_synth&year=2021&lat=51.5&lon=-0.5"
 ```
 
 ------------------------------------------------------------------------
@@ -240,7 +247,7 @@ Prerequisites
 
 ### Backend
 
-This will allow a user to query the /phenoloyg/point, /phenoloyg/timeseries and /phenoloyg/area API endpoints.
+This will allow a user to query the /phenology/point, /phenology/points, /phenology/timeseries, /phenology/area, /phenology/grid, /phenology/point/ndvi and /catalog API endpoints.
 
 a. Build and get API running (Only use -v tag if you want to clear the volume (databases and tables))
 ```bash
