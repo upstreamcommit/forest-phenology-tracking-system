@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 
+from fpts.api.routers.catalog import router as catalog_router
 from fpts.api.routers.debug import router as debug_router
 from fpts.api.routers.health import router as health_router
 from fpts.api.routers.metrics import router as metrics_router
@@ -37,8 +39,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Routers and middleware
     app.include_router(health_router)
+    app.include_router(catalog_router)
     app.include_router(phenology_router)
 
+    # A year of the grid is about 1.6 MB of JSON and compresses about 25-fold. Added first so it
+    # sits inside the logging middleware: that one re-streams bodies, which would make GZip skip
+    # its minimum_size check and compress every response.
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(RequestLoggingMiddleware)
 
     if settings.enable_metrics:

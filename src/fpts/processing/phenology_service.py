@@ -8,7 +8,7 @@ import xarray as xr
 from fpts.cache.keys import compute_point_cache_key
 from fpts.cache.redis_cache import RedisTTLCache
 from fpts.cache.ttl_cache import InMemoryTTLCache
-from fpts.domain.models import Location, PhenologyMetric
+from fpts.domain.models import Location, NdviCurve, PhenologyMetric
 from fpts.processing.ndvi_stack import (
     extract_ndvi_timeseries,
     extract_ndvi_timeseries_batch,
@@ -17,6 +17,7 @@ from fpts.processing.ndvi_stack import (
 from fpts.processing.phenology_algorithm import (
     DEFAULT_THRESHOLD_FRAC,
     compute_sos_eos_threshold,
+    ndvi_threshold,
 )
 from fpts.storage.raster_repository import RasterRepository
 from fpts.utils.logging import get_logger
@@ -83,21 +84,7 @@ class PhenologyComputationService:
                 extra={"cache": "point_metric_compute", "key": point_cache_key},
             )
 
-        stack_cache_key = (product, year)
-
-        if stack_cache_key in self._stack_cache:
-            stack = self._stack_cache[stack_cache_key]
-
-        else:
-            paths = self._raster_repo.list_ndvi_stack_paths(product=product, year=year)
-            if not paths:
-                raise FileNotFoundError(
-                    f"No NDVI stack files found for product={product}, year={year}"
-                )
-            stack = load_ndvi_stack(paths)
-            self._stack_cache[stack_cache_key] = stack
-
-        time_series = extract_ndvi_timeseries(stack, location)
+        time_series = extract_ndvi_timeseries(self._stack(product, year), location)
 
         dates = compute_sos_eos_threshold(
             ndvi=time_series.ndvi, doys=time_series.doys, frac=threshold_frac
@@ -137,20 +124,7 @@ class PhenologyComputationService:
         if not locations:
             return []
 
-        key = (product, year)
-
-        if key in self._stack_cache:
-            stack = self._stack_cache[key]
-        else:
-            paths = self._raster_repo.list_ndvi_stack_paths(product=product, year=year)
-            if not paths:
-                raise FileNotFoundError(
-                    f"No NDVI stack files found for product={product}, year={year}"
-                )
-            stack = load_ndvi_stack(paths)
-            self._stack_cache[key] = stack
-
-        series_list = extract_ndvi_timeseries_batch(stack, locations)
+        series_list = extract_ndvi_timeseries_batch(self._stack(product, year), locations)
 
         metrics: list[PhenologyMetric] = []
         for loc, ts in zip(locations, series_list, strict=True):
@@ -175,3 +149,45 @@ class PhenologyComputationService:
             )
 
         return metrics
+
+    def compute_point_curve(
+        self,
+        product: str,
+        year: int,
+        location: Location,
+        threshold_frac: float = DEFAULT_THRESHOLD_FRAC,
+    ) -> NdviCurve:
+        """
+        The NDVI series at the pixel nearest to location, with the threshold and the season
+        compute_point_phenology derives from it. Not cached: the stack itself is.
+        """
+        series = extract_ndvi_timeseries(self._stack(product, year), location)
+        dates = compute_sos_eos_threshold(ndvi=series.ndvi, doys=series.doys, frac=threshold_frac)
+
+        return NdviCurve(
+            year=year,
+            location=location,
+            pixel=series.pixel or location,
+            doys=tuple(series.doys),
+            ndvi=tuple(series.ndvi),
+            threshold_frac=threshold_frac,
+            threshold_ndvi=ndvi_threshold(series.ndvi, threshold_frac),
+            sos_date=_date_from_doy(year, dates.sos_doy) if dates.sos_doy else None,
+            eos_date=_date_from_doy(year, dates.eos_doy) if dates.eos_doy else None,
+            season_length=dates.season_length,
+        )
+
+    def _stack(self, product: str, year: int) -> xr.DataArray:
+        """
+        The NDVI stack for (product, year), loaded once per process.
+        Raises FileNotFoundError when there is none.
+        """
+        key = (product, year)
+        if key not in self._stack_cache:
+            paths = self._raster_repo.list_ndvi_stack_paths(product=product, year=year)
+            if not paths:
+                raise FileNotFoundError(
+                    f"No NDVI stack files found for product={product}, year={year}"
+                )
+            self._stack_cache[key] = load_ndvi_stack(paths)
+        return self._stack_cache[key]

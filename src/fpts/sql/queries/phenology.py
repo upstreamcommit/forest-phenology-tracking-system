@@ -83,3 +83,57 @@ LEFT JOIN phenology_metrics m
     )
 GROUP BY f.ok
 """
+
+GET_GRID = """
+SELECT
+    year,
+    lat,
+    lon,
+    sos_date,
+    eos_date,
+    season_length,
+    is_forest
+FROM phenology_metrics
+WHERE
+    product = %(product)s
+    AND year = %(year)s
+    AND lon BETWEEN %(min_lon)s AND %(max_lon)s
+    AND lat BETWEEN %(min_lat)s AND %(max_lat)s
+ORDER BY lat ASC, lon ASC
+LIMIT %(limit)s
+"""
+
+# Per product: the stored years, the extent, and the smallest gap between distinct longitudes.
+GET_STORED_COVERAGE = """
+WITH extents AS (
+    SELECT
+        product,
+        array_agg(DISTINCT year ORDER BY year) AS years,
+        MIN(lon) AS min_lon,
+        MIN(lat) AS min_lat,
+        MAX(lon) AS max_lon,
+        MAX(lat) AS max_lat
+    FROM phenology_metrics
+    GROUP BY product
+),
+lon_steps AS (
+    SELECT product, MIN(step) AS grid_step_deg
+    FROM (
+        SELECT product, lon - LAG(lon) OVER (PARTITION BY product ORDER BY lon) AS step
+        FROM (SELECT DISTINCT product, lon FROM phenology_metrics) AS distinct_lons
+    ) AS steps
+    WHERE step > %(min_step)s
+    GROUP BY product
+)
+SELECT
+    e.product,
+    e.years,
+    e.min_lon,
+    e.min_lat,
+    e.max_lon,
+    e.max_lat,
+    s.grid_step_deg
+FROM extents e
+LEFT JOIN lon_steps s USING (product)
+ORDER BY e.product
+"""

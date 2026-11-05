@@ -65,7 +65,7 @@ src/fpts/
 
 API Layer - Request validation - Response schemas - HTTP error mapping
 
-Application Layer - QueryService orchestrates read operations
+Application Layer - QueryService orchestrates read operations, and CatalogService reports which products, years and extents exist
 
 Storage Layer - PhenologyRepository (abstract) -
 PostGISPhenologyRepository (default production backend)
@@ -93,16 +93,28 @@ Behaviour:
 -   404 → No data for that location/year
 -   422 → Location outside the raster stack when computing (`mode=compute`, or `mode=auto` with no stored row or a non-default `threshold_frac`), a non-default `threshold_frac` with `mode=repo`, or invalid parameters
 
-The two modes read different synthetic datasets:
-- **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`.
-- **Raster stack (`mode=compute`)**: a 10x10 NDVI stack for 2020 only, covering lon -0.5 to -0.4 and lat 51.4 to 51.5 at 0.01°. Any point strictly inside a pixel works; pixel centres such as `lat=51.495&lon=-0.495` are safest. Points exactly on a pixel edge (multiples of 0.01°, such as `51.45,-0.45`) may currently be rejected as out of coverage.
+The two modes read different synthetic datasets (`GET /catalog` reports both):
+- **Stored metrics (`mode=repo`)**: a grid every 0.1° from lon -7.5 to 2.0 and lat 49.5 to 59.0, years 2016-2026. Lookups need an exact grid coordinate, such as `lat=51.5&lon=-0.5`; `/phenology/grid` returns them exactly as stored.
+- **Raster stack (`mode=compute`)**: a 101x101 NDVI stack per year for 2016-2026, 23 composites every 16 days, with pixel centres on every 0.01° from lon -1.0 to 0.0 and lat 51.0 to 52.0. Any point within half a pixel of a centre works, including the outer edges.
+
+The 121 stored grid points inside that square (such as `lat=51.5&lon=-0.5`) are also pixel
+centres, so they have both stored metrics and a computed season and NDVI curve; `mode=auto`
+returns the stored row there. Elsewhere only one source answers: `lat=52.5&lon=-1.0` is
+stored only, and off-grid pixel centres such as `lat=51.47&lon=-0.43` are computed only.
+
+Both datasets are invented, not observations, but come from one seasonal model so maps and
+charts show something and the two roughly agree: seasons start later and end earlier further
+north and on invented uplands, woodland sits in patchy clusters, springs drift slightly earlier
+each year, and some years have early or late springs or summer droughts that hit the south-east
+hardest (for example 2018 and 2022). Computed start and end dates land on composite days, so
+they differ from the stored dates at the same point by up to about one composite (16 days).
 
 Sample queries
 ```bash
 curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo"
 ```
 ```bash
-curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.495&lon=-0.495&mode=compute"
+curl "http://localhost:8000/phenology/point?product=ndvi_synth&year=2020&lat=51.47&lon=-0.43&mode=compute"
 ```
 
 ------------------------------------------------------------------------
@@ -158,6 +170,67 @@ curl "http://localhost:8000/phenology/area?year=2024&product=ndvi_synth&min_seas
 
 ------------------------------------------------------------------------
 
+### 4. GET /phenology/grid
+
+Returns the stored metrics of every grid point for one product and year as a GeoJSON
+FeatureCollection of points, ordered by lat then lon, for drawing a map in one request. Point
+coordinates are exactly as stored, so they can be passed back to `/phenology/point`
+(`mode=repo`) and `/phenology/timeseries` unchanged.
+
+Parameters:
+- year
+- product
+- bbox (optional): `min_lon,min_lat,max_lon,max_lat` in degrees, edges inclusive. It may not cross the antimeridian. Omit it for every stored point.
+
+Behavior:
+- 200 → FeatureCollection, empty when no stored points match
+- 422 → Invalid bbox (`type: value_error`), or more than `GRID_MAX_FEATURES` points (`type: too_many_features`, with `ctx.limit`; default 50,000, while the full seed grid is 9,216 per year). Both have `loc` `["query", "bbox"]`.
+
+Sample query
+```bash
+curl "http://localhost:8000/phenology/grid?product=ndvi_synth&year=2022&bbox=-0.6,51.4,-0.4,51.6"
+```
+
+------------------------------------------------------------------------
+
+### 5. GET /phenology/point/ndvi
+
+Returns the NDVI series at the raster pixel nearest a point, with the threshold and the SOS/EOS
+that `mode=compute` derives from it, for drawing the phenology curve.
+
+Parameters:
+- lat
+- lon
+- year
+- product
+- threshold_frac (optional, default 0.5)
+
+Behavior:
+- 200 → `observations` (doy, date, ndvi), the sampled `pixel` centre, `threshold_ndvi`, and `sos_date`, `eos_date`, `season_length`
+- 404 → No raster stack for that product and year
+- 422 → Location outside the raster stack (same body as `/phenology/point`), or invalid parameters
+
+Sample query
+```bash
+curl "http://localhost:8000/phenology/point/ndvi?product=ndvi_synth&year=2021&lat=51.5&lon=-0.5"
+```
+
+------------------------------------------------------------------------
+
+### 6. GET /catalog
+
+Lists the products the API can answer for: whether each is synthetic, and the years and extent
+of stored metrics (with the grid step) and of NDVI stacks that metrics can be computed from.
+Clients should read this instead of hard-coding product names, years or extents. Cached for a
+minute.
+
+Sample query
+```bash
+curl "http://localhost:8000/catalog"
+```
+
+------------------------------------------------------------------------
+
 ## Getting started
 
 Prerequisites
@@ -174,7 +247,7 @@ Prerequisites
 
 ### Backend
 
-This will allow a user to query the /phenoloyg/point, /phenoloyg/timeseries and /phenoloyg/area API endpoints.
+This will allow a user to query the /phenology/point, /phenology/points, /phenology/timeseries, /phenology/area, /phenology/grid, /phenology/point/ndvi and /catalog API endpoints.
 
 a. Build and get API running (Only use -v tag if you want to clear the volume (databases and tables))
 ```bash
@@ -188,6 +261,9 @@ major won't start with it: wipe it once with `docker compose down -v`. The `post
 images are amd64-only, so the database runs under emulation on arm64: Docker Desktop and
 Rancher Desktop on Apple Silicon provide it, while a plain Docker Engine on arm64 Linux needs
 amd64 emulation registered first (`docker run --privileged --rm tonistiigi/binfmt --install amd64`).
+
+The seed CSV is only generated when the data volume lacks one, so after the synthetic data
+changes (as in November 2026) run `docker compose down -v` once to pick up the new data.
 
 b. Tear down
 run `ctrl + c` to stop the container

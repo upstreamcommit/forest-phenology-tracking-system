@@ -16,6 +16,7 @@ from fpts.domain.errors import OutOfCoverageError
 from fpts.domain.models import PhenologyMetric
 from fpts.processing.phenology_service import PhenologyComputationService
 from fpts.processing.raster_service import RasterService
+from fpts.query.catalog import CatalogService
 from fpts.query.service import QueryService
 from fpts.storage.in_memory_repository import InMemoryPhenologyRepository
 from fpts.storage.local_raster_repository import LocalRasterRepository
@@ -103,6 +104,7 @@ def wire_in_memory_services(app, settings: Settings) -> None:
         area_stats_cache=app.state.area_stats_cache,
         timeseries_cache=app.state.timeseries_cache,
     )
+    app.state.catalog_service = CatalogService(repository=repo, raster_repo=app.state.raster_repo)
 
 
 def wire_postgis_services(app, settings: Settings) -> None:
@@ -167,3 +169,4 @@ def wire_postgis_services(app, settings: Settings) -> None:
         area_stats_cache=app.state.area_stats_cache,
         timeseries_cache=app.state.timeseries_cache,
     )
+    app.state.catalog_service = CatalogService(repository=repo, raster_repo=app.state.raster_repo)
