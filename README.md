@@ -184,7 +184,7 @@ Parameters:
 
 Behavior:
 - 200 → FeatureCollection, empty when no stored points match
-- 422 → Invalid bbox, or more than `GRID_MAX_FEATURES` points (default 50,000; the full seed grid is 9,216 per year)
+- 422 → Invalid bbox (`type: value_error`), or more than `GRID_MAX_FEATURES` points (`type: too_many_features`, with `ctx.limit`; default 50,000, while the full seed grid is 9,216 per year). Both have `loc` `["query", "bbox"]`.
 
 Sample query
 ```bash

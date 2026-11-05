@@ -142,14 +142,14 @@ def test_more_points_than_the_limit_is_its_own_422():
     assert error["ctx"] == {"limit": 4}
     assert error["input"] is None  # no bbox was sent
 
-    exactly_the_limit = client.get(
-        "/phenology/grid", params={"year": 2020, "bbox": "-0.6,51.5,0.3,52.1"}
-    )
-    assert exactly_the_limit.status_code == 422  # 5 points
+    one_over = client.get("/phenology/grid", params={"year": 2020, "bbox": "-0.6,51.5,0.3,52.1"})
+    assert one_over.status_code == 422  # 5 points
 
-    under = client.get("/phenology/grid", params={"year": 2020, "bbox": "-0.6,51.5,0.3,51.5"})
-    assert under.status_code == 200
-    assert len(under.json()["features"]) == 3
+    exactly_the_limit = client.get(
+        "/phenology/grid", params={"year": 2020, "bbox": "-0.5,51.5,0.3,52.1"}
+    )
+    assert exactly_the_limit.status_code == 200
+    assert len(exactly_the_limit.json()["features"]) == 4
 
 
 def test_the_limit_must_be_positive():
@@ -168,6 +168,10 @@ def test_large_responses_are_gzipped_for_clients_that_accept_it():
 
     assert resp.headers["content-encoding"] == "gzip"
     assert len(resp.json()["features"]) == 55  # httpx decodes it transparently
+
+    small = client.get("/health", headers={"Accept-Encoding": "gzip"})
+    assert "content-encoding" not in small.headers  # under the 1 KB minimum
+    assert "x-request-id" in small.headers
     raw = client.get(
         "/phenology/grid", params={"year": 2020}, headers={"Accept-Encoding": "identity"}
     )

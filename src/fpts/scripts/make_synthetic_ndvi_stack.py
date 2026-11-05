@@ -36,7 +36,8 @@ NORTH = 52.0 + PIXEL_DEG / 2
 # computed dates on the model's dates.
 _HALF_COMPOSITE_DAYS = 8.0
 # Bump this when the generated data changes, so existing data volumes are rewritten.
-VERSION = "v2"
+# v3: 101x101 grid-aligned stack driven by the shared seasonal model.
+VERSION = "v3"
 
 
 def write_geotiff(path: Path, data: np.ndarray, transform, crs: str = "EPSG:4326") -> None:

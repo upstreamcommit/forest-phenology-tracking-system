@@ -189,7 +189,9 @@ class PhenologyGridResponse(BaseModel):
 class NdviObservationSchema(BaseModel):
     doy: int
     date: date
-    ndvi: Optional[float] = Field(..., description="null when the composite has no value.")
+    ndvi: Optional[float] = Field(
+        ..., description="null for a NaN composite; the declared nodata value is not masked yet."
+    )
 
     model_config = _RESPONSE_CONFIG
 

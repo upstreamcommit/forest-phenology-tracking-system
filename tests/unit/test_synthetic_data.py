@@ -40,10 +40,20 @@ SEED_ARGS = [
     "--step-deg",
     "0.5",
 ]
-# The 0.1 degree stored grid points inside the stack: lon -1.0..0.0 by lat 51.0..52.0.
+# The stored grid points inside the stack (lon -1.0..0.0, lat 51.0..52.0), exactly as compose
+# generates them, so the agreement test sees the stored coordinates themselves.
 OVERLAP = [
-    (round(51.0 + 0.1 * i, 6), round(-1.0 + 0.1 * j, 6)) for i in range(11) for j in range(11)
+    (lat, lon)
+    for lon, lat in generate_seed_metrics.generate_points(
+        generate_seed_metrics.Bounds(-7.5, 2.0, 49.5, 59.0), 0.1
+    )
+    if -1.0 - 1e-9 <= lon <= 1e-9 and 51.0 - 1e-9 <= lat <= 52.0 + 1e-9
 ]
+
+
+OVERLAP_POINTS_ALL = generate_seed_metrics.generate_points(
+    generate_seed_metrics.Bounds(-7.5, 2.0, 49.5, 59.0), 0.1
+)
 
 
 def _doy(iso: str) -> int:
@@ -187,7 +197,14 @@ def test_stack_greens_up_earlier_in_an_early_spring(stack_root):
     assert mean_ndvi(2025, 97) > mean_ndvi(2021, 97) + 0.05
 
 
+def test_stored_grid_has_no_negative_zero():
+    lons = {lon for lon, _ in OVERLAP_POINTS_ALL}
+    assert 0.0 in lons
+    assert all(str(lon) != "-0.0" for lon in lons)
+
+
 def test_stored_grid_points_inside_the_stack_have_a_matching_curve(stack_root):
+    assert len(OVERLAP) == 121
     service = PhenologyComputationService(raster_repo=LocalRasterRepository(stack_root))
 
     for year in (2018, 2022):
@@ -228,6 +245,21 @@ def test_stack_replaces_the_previous_layout_on_an_existing_volume(tmp_path, monk
     assert sorted(p.name for p in (product_dir / "2020").glob("doy_*.tif")) == EXPECTED
     with rasterio.open(product_dir / "2020" / "doy_001.tif") as src:
         assert src.shape == (101, 101)
+
+
+def test_stack_from_an_older_version_is_rewritten(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    product_dir = tmp_path / "raw" / "ndvi_synth"
+    make_synthetic_ndvi_stack.main(years=(2020,))
+    composite = product_dir / "2020" / "doy_001.tif"
+    written_at = composite.stat().st_mtime_ns
+    # Same file names, but written by an earlier version of the generator.
+    (product_dir / ".seeded").write_text("v2\n")
+
+    make_synthetic_ndvi_stack.main(years=(2020,))
+
+    assert composite.stat().st_mtime_ns != written_at
+    assert (product_dir / ".seeded").read_text().strip() == make_synthetic_ndvi_stack.VERSION
 
 
 def test_stack_rerun_is_skipped_until_its_files_change(tmp_path, monkeypatch):

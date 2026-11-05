@@ -40,16 +40,18 @@ def phenology_dates(year: int, lat: float, lon: float, forest: bool) -> tuple[da
 
 
 def generate_points(bounds: Bounds, step_deg: float) -> list[tuple[float, float]]:
+    # "+ 0.0" turns a -0.0 from rounding a tiny negative into 0.0, so the CSV says 0.0 and the
+    # model's string keys match the raster stack's pixel centres.
     lons = []
     x = bounds.lon_min
     while x <= bounds.lon_max + 1e-12:
-        lons.append(round(x, 6))
+        lons.append(round(x, 6) + 0.0)
         x += step_deg
 
     lats = []
     y = bounds.lat_min
     while y <= bounds.lat_max + 1e-12:
-        lats.append(round(y, 6))
+        lats.append(round(y, 6) + 0.0)
         y += step_deg
 
     return [(lon, lat) for lat in lats for lon in lons]

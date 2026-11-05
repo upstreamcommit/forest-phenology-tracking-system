@@ -93,6 +93,8 @@ check 200 "catalog" "$BASE_URL/catalog"
 # Stored grid points inside the raster stack (lon -1.0..0.0, lat 51.0..52.0) have both sources.
 check 200 "point, compute at a stored grid point" \
   "$P/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=compute"
+check 200 "point, compute at the stack's south-west grid point (fails on a stale data volume)" \
+  "$P/point?product=ndvi_synth&year=2020&lat=51.0&lon=-1.0&mode=compute"
 check 422 "grid, bbox crossing the antimeridian" \
   "$P/grid?product=ndvi_synth&year=2022&bbox=179,51,-179,52"
 check 404 "point ndvi, year without a raster stack" \

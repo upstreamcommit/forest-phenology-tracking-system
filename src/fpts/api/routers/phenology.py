@@ -348,6 +348,10 @@ def get_phenology_grid(
     FeatureCollection of points ordered by lat then lon. Point coordinates are exactly as
     stored, so they can be passed back to /point (mode=repo) and /timeseries unchanged.
     An area with no stored points returns an empty collection.
+
+    422 errors on `bbox` have type `value_error` for a malformed box, and `too_many_features`
+    (with `ctx.limit`, and `input` null when no bbox was sent) when more points match than the
+    server returns at once.
     """
     box = _parse_bbox(bbox)
     limit = settings.grid_max_features
