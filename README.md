@@ -42,11 +42,12 @@ Backend
 
 
 Frontend
-## Frontend Development
 
-Prerequisites:
-- Node.js 22.13+ or 24+ (the `engines` range in `frontend/package.json`)
-- npm >= 10
+- Forest Phenology Explorer: React 19, React Router, TanStack Query, MapLibre GL with
+  OpenFreeMap basemaps, Tailwind CSS (light and dark themes). See `frontend/README.md`.
+- Tests: Vitest, Testing Library and MSW; Playwright with axe for end-to-end and accessibility.
+- Prerequisites: Node.js 22.22.2+, 24.15+ or 26+ (the `engines` range in `frontend/package.json`),
+  npm >= 10.
 
 ------------------------------------------------------------------------
 
@@ -238,7 +239,7 @@ Prerequisites
 - Poetry 2 (CI and the Docker image use 2.5.1).
 - (Optional) Git & GitHub for version control.
 - Docker
-- Node.js 22.13+ or 24+
+- Node.js 22.22.2+, 24.15+ or 26+
 - npm >= 10
 
 ------------------------------------------------------------------------
@@ -286,11 +287,18 @@ docker exec -it fpts-postgis psql -U postgres -d fpts -c "\dt"
 
 ### Frontend
 
-## Frontend Development
+With the backend running (above), start the map explorer on http://localhost:5173. The dev
+server forwards API requests to http://localhost:8000.
 
+```bash
 cd frontend
 npm ci
 npm run dev
+```
+
+Tests: `npm test` (unit and component) and `npm run e2e` (Playwright end-to-end and axe
+accessibility checks; run `npx playwright install chromium` once first). More in
+`frontend/README.md`.
 
 ------------------------------------------------------------------------
 
@@ -348,7 +356,9 @@ Actions tab, in three jobs:
   `./precommit_tests.sh` uses).
 - **stack**: builds every image, starts `docker compose`, and runs `./compose_smoke_test.sh`,
   which must end with `all checks passed` (so the API log was checked for server exceptions).
-- **frontend**: `npm ci`, `npm run lint` and `npm run build` in `frontend/` on Node 24.
+- **frontend**: `npm ci`, `npm run lint`, `npm test`, `npm run build` and `npm run e2e`
+  (Playwright end-to-end and axe accessibility tests against the build, with the API mocked) in
+  `frontend/` on Node 24.
 
 ------------------------------------------------------------------------
 
@@ -358,7 +368,7 @@ Production Hardening:
 
 -   Docker + docker-compose (API + PostGIS)
 -   GitHub Actions CI (lint, unit + integration tests with coverage, compose stack smoke test,
-    frontend build)
+    frontend tests, build and end-to-end tests)
 -   Structured logging
 -   Request logging middleware
 -   Optional Prometheus metrics endpoint

@@ -127,5 +127,23 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Unit and component tests
+        run: npm test
+
       - name: Build
         run: npm run build
+
+      - name: Install the Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Builds again with VITE_BASEMAP=none and mocks the API, so it needs no backend or network.
+      - name: End-to-end and accessibility tests
+        run: npm run e2e
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 7
