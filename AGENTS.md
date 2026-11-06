@@ -28,9 +28,9 @@ Run everything from the repository root.
 | Unit + integration (needs Docker) | `./precommit_tests.sh` (starts an isolated PostGIS test DB on port 55432, runs unit and integration tests with the coverage gate, tears it down) |
 | Lint | `poetry run ruff check src tests` |
 | Format | `poetry run ruff format src tests` |
-| Full stack | `docker compose up --build`, API on http://localhost:8000 (`/docs` for OpenAPI) |
-| Stack smoke test | `./compose_smoke_test.sh` against the running stack (README examples and cache separation) |
-| Stack teardown | `docker compose down --remove-orphans` (add `-v` only to wipe the DB and data volumes) |
+| Full stack | `docker compose up --build`, API on http://localhost:8000 (`/docs` for OpenAPI); add `--profile web` for the frontend on http://localhost:8080 (nginx, also proxying the API) |
+| Stack smoke test | `./compose_smoke_test.sh` against the running stack (README examples and cache separation, plus the frontend's pages and nginx's security and caching headers when anything answers on `WEB_URL`, default http://localhost:8080; `REQUIRE_WEB=1`, as in CI, makes those mandatory) |
+| Stack teardown | `docker compose --profile web down --remove-orphans` (add `-v` only to wipe the DB and data volumes; `--profile web` includes the frontend, and is harmless when it never ran) |
 | API without Docker | `PHENOLOGY_REPO_BACKEND=memory DATA_DIR=tests/fixtures poetry run uvicorn fpts.api.main:app --reload` |
 | Frontend | `cd frontend && npm ci && npm run dev` (proxies API paths to http://localhost:8000; `FPTS_API_URL` overrides) |
 | Frontend checks | in `frontend/`: `npm run lint`, `npm test`, `npm run build`, `npm run e2e` (Playwright; `npx playwright install chromium` once) |
@@ -38,8 +38,10 @@ Run everything from the repository root.
 CI (`.github/workflows/ci.yml`) runs on pull requests, pushes to `main` and manual dispatch, in
 three jobs whose names are the check names: `python` (`poetry check --lock`, ruff, unit +
 integration tests with coverage on the `docker-compose.test.yml` database), `stack`
-(`docker compose build` and `up`, then `./compose_smoke_test.sh`, whose last line must be
-`all checks passed`) and `frontend` (`npm ci`, `npm run lint`, `npm test`, `npm run build`, `npm run e2e` on Node 24).
+(`docker compose --profile web build` and `up`, then `./compose_smoke_test.sh` with
+`REQUIRE_WEB=1`, whose last line must be `all checks passed`, then `docker compose --profile web
+down -v --remove-orphans`) and `frontend` (`npm ci`, `npm run lint`, `npm test`, `npm run build`,
+`npm run e2e` on Node 24).
 Coverage scope and the `fail_under` floor are in `pyproject.toml`. The floor sits at the measured
 figure, so new code without tests fails the gate; raise it when coverage rises, never lower it to
 get a change through.
@@ -61,13 +63,13 @@ mean they did not run.
 - `src/fpts/ingestion/` MODIS MOD13Q1 plan/fetch CLI (`python -m fpts.ingestion`).
 - `src/fpts/scripts/` seed scripts used by docker compose, plus ad-hoc fixture generators.
 - `tests/unit/` (no external services), `tests/integration/` (`@pytest.mark.integration`, real PostGIS), `tests/fixtures/` (small committed GeoTIFF stacks).
-- `frontend/` the React app: `src/api/` (generated OpenAPI types, client, query hooks), `src/app/` (shell, router), `src/features/` (map, point panel, charts, about), `src/test/` (MSW fixtures), `e2e/` (Playwright).
+- `frontend/` the React app: `src/api/` (generated OpenAPI types, client, query hooks), `src/app/` (shell, router), `src/features/` (map, point panel, point detail, charts, about), `src/test/` (MSW fixtures), `e2e/` (Playwright). Serving: `Dockerfile` (build, then nginx), `nginx.conf`, `security-headers.conf` (the CSP and other security headers, shared by nginx and `vite preview`), `public/theme-init.js` (the theme before first paint, a file rather than inline so the CSP can be `script-src 'self'`).
 
 ## Conventions
 
 - Python 3.12 everywhere (local, CI and the Docker image). Poetry 2; CI and the image pin 2.5.1. Ruff with line length 100 and rules E, F, I. Code must pass `ruff check` and `ruff format --check`.
 - Keep the layering: routers -> services -> repositories -> SQL. Routers do not touch repositories or SQL directly.
-- All SQL lives in `src/fpts/sql/queries/`. Schema changes go in `src/fpts/sql/ddl/` and need a note in the PR (there is no migration tool yet). Both PostGIS Dockerfiles copy the whole `ddl/` directory into initdb, where they run in name order together with the image's own `10_postgis.sh` (so DDL should `CREATE EXTENSION IF NOT EXISTS` what it needs), so a new DDL file needs no other wiring, but existing dev databases only pick it up after `docker compose down -v`.
+- All SQL lives in `src/fpts/sql/queries/`. Schema changes go in `src/fpts/sql/ddl/` and need a note in the PR (there is no migration tool yet). Both PostGIS Dockerfiles copy the whole `ddl/` directory into initdb, where they run in name order together with the image's own `10_postgis.sh` (so DDL should `CREATE EXTENSION IF NOT EXISTS` what it needs), so a new DDL file needs no other wiring, but existing dev databases only pick it up after `docker compose --profile web down -v`.
 - Domain models in `src/fpts/domain/` are frozen dataclasses (exceptions in `errors.py` are plain `Exception` subclasses, because frameworks set attributes such as `__traceback__` on them); API shapes are Pydantic models in `schemas.py`.
 - Configuration comes from `fpts.config.settings.Settings` (environment variables or `.env`). Add new settings there with a safe default.
 - Every behaviour change needs a test. Unit tests must not need Docker; anything that needs PostGIS goes in `tests/integration/` with the `integration` marker.
@@ -92,14 +94,15 @@ mean they did not run.
 - `fpts.api.main` builds an app at import time (`app = create_app()`), so importing it reads `Settings` from the environment and `.env`.
 - Raster stacks are read from `{DATA_DIR}/raw/{product}/{year}/doy_NNN.tif` and are assumed to be EPSG:4326 with x = lon, y = lat.
 - Repository point and timeseries lookups match lat/lon by exact float equality, so only exact seed-grid coordinates hit. `/phenology/grid` returns stored coordinates exactly; clients should reuse them rather than round clicks to the grid.
-- Existing dev volumes keep their seed CSV (it is only generated when missing), so new synthetic data needs `docker compose down -v`. The NDVI stack generator rewrites its stacks when its `VERSION` changes; bump it whenever the generated rasters change.
+- Existing dev volumes keep their seed CSV (it is only generated when missing), so new synthetic data needs `docker compose --profile web down -v`. The NDVI stack generator rewrites its stacks when its `VERSION` changes; bump it whenever the generated rasters change.
 - New product names should be registered in `src/fpts/domain/products.py` with a label and whether they are synthetic; unregistered products show `synthetic: null` in `/catalog`.
 - `mode=repo` returns stored synthetic seed metrics; `mode=compute` computes from the raster stack. The stack's pixel centres sit on 0.01 degree multiples over lon -1.0..0.0, lat 51.0..52.0, so the 121 stored grid points there are answered by both (`mode=auto` returns the stored row). Use `lat=51.5&lon=-0.5` for both, `lat=52.5&lon=-1.0` for repo only and off-grid pixel centres such as `lat=51.47&lon=-0.43` for compute only. Repo examples need the docker compose (PostGIS) stack: the memory backend starts with no stored metrics, so `mode=repo` always 404s there.
 - The API image installs exactly the versions in `poetry.lock` (main group). After dependency changes, run `poetry lock` and `poetry sync`, or tests run on different versions from the image.
-- The `postgis/postgis` images are amd64-only, so both compose files pin `platform: linux/amd64` (Apple Silicon emulates it). Postgres 18 keeps data under `/var/lib/postgresql/18/`, so the dev volume mounts at `/var/lib/postgresql`. A volume from an older major needs `docker compose down -v`.
+- The `postgis/postgis` images are amd64-only, so both compose files pin `platform: linux/amd64` (Apple Silicon emulates it). Postgres 18 keeps data under `/var/lib/postgresql/18/`, so the dev volume mounts at `/var/lib/postgresql`. A volume from an older major needs `docker compose --profile web down -v`.
 - Dependabot groups take minor and patch updates only. It ignores Python (image) minor and major, Postgres major, and TypeScript minor and major updates; see `.github/dependabot.yml` for why. Those upgrades are deliberate PRs, and the ignores also stop Dependabot security updates for them.
 - The Poetry pins in `Dockerfile` and `.github/workflows/ci.yml` are bumped by hand, together. Dependabot regenerates `poetry.lock` with its own Poetry, so when reviewing its pip PRs check the lock header and `lock-version` against those pins.
 - Frontend: grid coordinates go back to the API exactly as received (`String(number)` round-trips doubles), because stored lookups match by exact float equality; never round them. API dates are calendar dates handled in UTC (`frontend/src/lib/dates.ts`). Components use the design-token classes from `frontend/src/styles/index.css` (`bg-surface`, `text-ink-muted` ...), never raw colours. After API changes, regenerate `frontend/src/api/schema.gen.ts` (see `frontend/README.md`).
+- The frontend's security headers are defined once, in `frontend/security-headers.conf`: nginx includes it, and `vite.config.ts` parses it into `preview.headers`, so the end-to-end and axe tests run under the real CSP (the dev server sends none). Keep its `add_header Name "value" always;` form. `compose_smoke_test.sh` pins the full CSP, so change both together; nothing in `index.html` may be an inline script.
 - Cache keys hold the exact inputs of the uncached lookup and are namespaced by source (`cache/keys.py`). Keep it that way: a cache hit must never change a response.
 
 ## Safety

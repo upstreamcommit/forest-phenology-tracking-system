@@ -79,15 +79,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # --profile web adds the frontend (nginx serving the built app and proxying the API).
       - name: Build images
-        run: docker compose build
+        run: docker compose --profile web build
 
-      # Seeds the database and data volume, then starts the API.
+      # Seeds the database and data volume, then starts the API and the frontend.
       - name: Start the stack
-        run: docker compose up -d
+        run: docker compose --profile web up -d
 
       # The script's last line is "all checks passed" only when the API log was checked too.
       - name: Smoke test
+        env:
+          REQUIRE_WEB: "1"
         run: |
           ./compose_smoke_test.sh | tee "$RUNNER_TEMP/smoke.log"
           last_line="$(tail -n 1 "$RUNNER_TEMP/smoke.log")"
@@ -98,11 +101,11 @@ jobs:
 
       - name: Show container logs
         if: failure()
-        run: docker compose logs --no-color
+        run: docker compose --profile web logs --no-color
 
       - name: Stop the stack
         if: always()
-        run: docker compose down -v --remove-orphans
+        run: docker compose --profile web down -v --remove-orphans
 
   frontend:
     runs-on: ubuntu-latest

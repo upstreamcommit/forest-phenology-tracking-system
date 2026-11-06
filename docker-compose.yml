@@ -128,6 +128,19 @@ services:
         condition: service_completed_successfully
       seed_postgis:
         condition: service_completed_successfully
+  web:
+    # The frontend, served by nginx, which forwards API paths to the api service. Opt-in with
+    # `docker compose --profile web up --build`: its image runs `npm ci`, which fails behind
+    # TLS-inspecting proxies, and the backend shouldn't depend on that. Tear down with
+    # `docker compose --profile web down` too, so the profile's service is included.
+    profiles: ["web"]
+    build: ./frontend
+    container_name: fpts-web
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_started
 
 volumes:
   db_data:

@@ -84,3 +84,8 @@ if (!globalThis.ResizeObserver) {
     disconnect() {}
   }
 }
+
+// jsdom has no layout, so no scrolling; tests that check scrolling stub this themselves.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}

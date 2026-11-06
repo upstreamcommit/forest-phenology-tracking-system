@@ -9,19 +9,7 @@
       content="Explore synthetic forest phenology metrics: start, end and length of the growing season on a map."
     />
     <title>Forest Phenology Explorer</title>
-    <script>
-      // Apply the saved or system theme before first paint, so the page never flashes the wrong one.
-      ;(function () {
-        var theme = 'system'
-        try {
-          theme = localStorage.getItem('fpts-theme') || 'system'
-        } catch (e) {}
-        var dark =
-          theme === 'dark' ||
-          (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-      })()
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

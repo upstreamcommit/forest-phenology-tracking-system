@@ -108,7 +108,8 @@ charts show something and the two roughly agree: seasons start later and end ear
 north and on invented uplands, woodland sits in patchy clusters, springs drift slightly earlier
 each year, and some years have early or late springs or summer droughts that hit the south-east
 hardest (for example 2018 and 2022). Computed start and end dates land on composite days, so
-they differ from the stored dates at the same point by up to about one composite (16 days).
+at the default threshold (0.5, the one stored metrics use) they differ from the stored dates at
+the same point by up to about one composite (16 days). Other thresholds move them further.
 
 Sample queries
 ```bash
@@ -252,30 +253,45 @@ This will allow a user to query the /phenology/point, /phenology/points, /phenol
 
 a. Build and get API running (Only use -v tag if you want to clear the volume (databases and tables))
 ```bash
-docker compose down -v --remove-orphans
+docker compose --profile web down -v --remove-orphans
 
 docker compose up --build
 ```
 
 The database runs Postgres 18 (PostGIS 3.6). A `db_data` volume created by an older Postgres
-major won't start with it: wipe it once with `docker compose down -v`. The `postgis/postgis`
+major won't start with it: wipe it once with `docker compose --profile web down -v`. The `postgis/postgis`
 images are amd64-only, so the database runs under emulation on arm64: Docker Desktop and
 Rancher Desktop on Apple Silicon provide it, while a plain Docker Engine on arm64 Linux needs
 amd64 emulation registered first (`docker run --privileged --rm tonistiigi/binfmt --install amd64`).
 
 The seed CSV is only generated when the data volume lacks one, so after the synthetic data
-changes (as in November 2026) run `docker compose down -v` once to pick up the new data.
+changes (as in November 2026) run `docker compose --profile web down -v` once to pick up the new data.
+
+To run the frontend in docker too, add the `web` profile; the app is then on
+http://localhost:8080, served by nginx, which also forwards the API:
+
+```bash
+docker compose --profile web up --build
+```
+
+The frontend image runs `npm ci` inside Docker, which fails behind a TLS-inspecting proxy that
+the container does not trust. In that case use the dev server instead (see Frontend below).
 
 b. Tear down
 run `ctrl + c` to stop the container
-Then the following for clean up:
+Then the following for clean up. `--profile web` includes the frontend container: a plain
+`down` leaves it behind, and the next `up` can then fail on the removed network. It is harmless
+when the frontend never ran.
 ``` bash
-docker compose down -v --remove-orphans
+docker compose --profile web down -v --remove-orphans
 ```
 
 ### Other relevant/ useful commands
 
-- Smoke-test the running stack with the sample queries above (Run in another terminal tab)
+- Smoke-test the running stack with the sample queries above (Run in another terminal tab).
+  When anything answers on http://localhost:8080 (`WEB_URL`), it also checks the frontend there:
+  the app, the API through nginx, and the security and caching headers nginx sends. Without a
+  frontend those checks are skipped, unless `REQUIRE_WEB=1`.
 ```bash
 ./compose_smoke_test.sh
 ```
@@ -354,8 +370,11 @@ Actions tab, in three jobs:
 - **python**: `poetry check --lock`, ruff, then unit and integration tests together with coverage
   against the Postgres 18 / PostGIS 3.6 test database from `docker-compose.test.yml` (the same one
   `./precommit_tests.sh` uses).
-- **stack**: builds every image, starts `docker compose`, and runs `./compose_smoke_test.sh`,
-  which must end with `all checks passed` (so the API log was checked for server exceptions).
+- **stack**: builds every image and starts the stack with `docker compose --profile web` (the
+  frontend too), and runs `./compose_smoke_test.sh` with `REQUIRE_WEB=1`, which must end with
+  `all checks passed` (so the API log was checked for server exceptions). Besides the API it
+  checks the frontend through nginx: pages, the API proxy, the Content-Security-Policy and other
+  security headers, and caching.
 - **frontend**: `npm ci`, `npm run lint`, `npm test`, `npm run build` and `npm run e2e`
   (Playwright end-to-end and axe accessibility tests against the build, with the API mocked) in
   `frontend/` on Node 24.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke-test a running docker compose stack with the README examples.
+# Smoke-test a running docker compose stack with the README examples, and the frontend on $WEB_URL.
 #
 # Usage: docker compose up -d --build, then
 #   ./compose_smoke_test.sh
@@ -10,6 +10,8 @@ set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 BASE_URL="${BASE_URL%/}"
+WEB_URL="${WEB_URL:-http://localhost:8080}"
+WEB_URL="${WEB_URL%/}"
 API_CONTAINER="${API_CONTAINER:-fpts-api}"
 failures=0
 log_file="$(mktemp)"
@@ -115,6 +117,119 @@ check 422 "point, compute is not answered from the repo cache (out of raster cov
   "$P/point?product=ndvi_synth&year=2020&lat=52.5&lon=-1.0&mode=compute"
 check 422 "point, repo rejects a custom threshold" \
   "$P/point?product=ndvi_synth&year=2020&lat=51.5&lon=-0.5&mode=repo&threshold_frac=0.3"
+
+# The frontend through nginx: the app itself, an SPA route, and the API through its proxy.
+check_body() {
+  local expected="$1" label="$2" url="$3"
+  if curl -fs --max-time 30 "$url" | grep -q "$expected"; then
+    echo "ok   200 $label"
+  else
+    echo "FAIL $label (no \"$expected\" in $url)"
+    failures=$((failures + 1))
+  fi
+}
+
+# Checks the status and response headers of a GET that accepts gzip. Each "Name: value" argument
+# after the URL must be that header's only value; "Name: " means the header must be absent.
+check_headers() {
+  local expected_status="$1" label="$2" url="$3"
+  shift 3
+  local headers status expected name value actual shown bad=""
+  headers="$(curl -s -o /dev/null -D - --max-time 30 -H 'Accept-Encoding: gzip' "$url" \
+    | tr -d '\r')"
+  status="$(printf '%s\n' "$headers" | awk 'NR == 1 { print $2 }')"
+  [ "$status" = "$expected_status" ] || bad="status ${status:-none} (expected $expected_status)"
+  for expected in "$@"; do
+    name="${expected%%:*}"
+    value="${expected#*: }"
+    actual="$(printf '%s\n' "$headers" | awk -v name="$name" '
+      index(tolower($0), tolower(name) ":") == 1 { sub(/^[^:]*:[ \t]*/, ""); print }')"
+    if [ "$actual" != "$value" ]; then
+      shown="'${value:-absent}'"
+      [ "$value" = "$WEB_CSP" ] && shown="the policy pinned in WEB_CSP"
+      bad="${bad:+$bad; }$name is '${actual:-absent}' (expected $shown)"
+    fi
+  done
+  if [ -z "$bad" ]; then
+    echo "ok   $status $label"
+  else
+    echo "FAIL $label: $bad"
+    failures=$((failures + 1))
+  fi
+}
+
+# The policy in frontend/security-headers.conf, which nginx and `vite preview` send. Pinned here
+# so that a change to it is deliberate: the map needs connect-src for OpenFreeMap, and the app
+# runs no inline script.
+WEB_CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+WEB_CSP+=" img-src 'self' data: blob: https://tiles.openfreemap.org;"
+WEB_CSP+=" connect-src 'self' https://tiles.openfreemap.org; worker-src 'self' blob:;"
+WEB_CSP+=" font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+WEB_SECURITY=(
+  "Content-Security-Policy: $WEB_CSP"
+  "X-Content-Type-Options: nosniff"
+  "Referrer-Policy: strict-origin-when-cross-origin"
+)
+WEB_IMMUTABLE="Cache-Control: public, max-age=31536000, immutable"
+
+# The frontend runs only with `--profile web`; REQUIRE_WEB=1 (set in CI) makes it mandatory.
+# Without it the checks are skipped only when nothing answers: an error status is a failure.
+web_status="$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$WEB_URL/" 2>/dev/null)"
+if [ "${REQUIRE_WEB:-0}" = 1 ] || [ "${web_status:-000}" != 000 ]; then
+  check_body "Forest Phenology Explorer" "web, app page" "$WEB_URL/"
+  check_body "Forest Phenology Explorer" "web, app route served as the app" \
+    "$WEB_URL/point/51.5/-0.5?year=2021"
+  check_body '"default_threshold_frac"' "web, API through the proxy" "$WEB_URL/catalog"
+  check_headers 200 "web, app page headers (CSP, never cached, no server version)" "$WEB_URL/" \
+    "${WEB_SECURITY[@]}" "Cache-Control: no-cache" "Server: nginx"
+  check_headers 200 "web, app route headers" "$WEB_URL/point/51.5/-0.5" \
+    "${WEB_SECURITY[@]}" "Cache-Control: no-cache"
+  # Error pages keep the security headers but are never cached as immutable.
+  check_headers 404 "web, missing asset headers" "$WEB_URL/assets/smoke-test-missing.js" \
+    "${WEB_SECURITY[@]}" "Cache-Control: "
+  # The API's redirects keep the port the browser used.
+  check_headers 307 "web, API redirect through the proxy keeps the port" "$WEB_URL/catalog/" \
+    "Location: $WEB_URL/catalog"
+
+  # script-src 'self' blocks inline scripts, so index.html may only load scripts by src.
+  # Newlines are joined first, so a <script> tag split across lines is still seen.
+  index_html="$(curl -fs --max-time 30 "$WEB_URL/")"
+  scripts="$(printf '%s\n' "$index_html" | tr '\n' ' ' | grep -oiE '<script[^>]*>')"
+  inline="$(printf '%s\n' "$scripts" | grep -viE '[[:space:]]src=')"
+  if [ -z "$scripts" ]; then
+    echo "FAIL web, no <script src> found in index.html (is the app being served?)"
+    failures=$((failures + 1))
+  elif [ -n "$inline" ]; then
+    echo "FAIL web, index.html has an inline script, which the CSP blocks: $inline"
+    failures=$((failures + 1))
+  else
+    echo "ok   200 web, index.html has no inline script"
+  fi
+
+  # Browsers refuse module workers without a JavaScript MIME type, and the map stays blank.
+  # The worker is referenced from the lazily loaded map chunk, two hops from index.html.
+  js_files="$(printf '%s\n' "$index_html" | grep -oE 'assets/[A-Za-z0-9_.-]+\.js' | sort -u)"
+  chunks="$(for js in $js_files; do curl -fs --max-time 30 "$WEB_URL/$js"; done \
+    | grep -oE 'assets/[A-Za-z0-9_.-]+\.js' | sort -u)"
+  worker="$(for js in $js_files $chunks; do curl -fs --max-time 30 "$WEB_URL/$js"; done \
+    | grep -oE 'maplibre-gl-worker-[A-Za-z0-9_-]{8}\.mjs' | head -n 1)"
+  worker_type="$(curl -fsI --max-time 30 "$WEB_URL/assets/$worker" 2>/dev/null \
+    | tr -d '\r' | awk -F': ' 'tolower($1) == "content-type" { print $2 }')"
+  if [ -n "$worker" ] && [[ "$worker_type" == *javascript* ]]; then
+    echo "ok   200 web, map worker served as JavaScript"
+  else
+    echo "FAIL web, map worker ${worker:-not found} served as '${worker_type:-nothing}'"
+    failures=$((failures + 1))
+  fi
+  # Fingerprinted, so cached for good; gzipped, so caches must keep the encodings apart.
+  js_file="$(printf '%s\n' "$js_files" | head -n 1)"
+  check_headers 200 "web, script asset headers" "$WEB_URL/${js_file:-assets/none-found.js}" \
+    "${WEB_SECURITY[@]}" "$WEB_IMMUTABLE" "Vary: Accept-Encoding"
+  check_headers 200 "web, map worker headers" "$WEB_URL/assets/${worker:-none-found.mjs}" \
+    "${WEB_SECURITY[@]}" "$WEB_IMMUTABLE" "Vary: Accept-Encoding"
+else
+  echo "SKIP web checks: nothing at $WEB_URL (start it with docker compose --profile web up)"
+fi
 
 # Server exceptions logged during the run, for example after a handler has already responded.
 if [ -n "$container_id" ]; then

@@ -8,7 +8,7 @@ import {
   type FocusEvent,
   type ReactNode,
 } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
 import { isPointPanelQuery, useCatalog, useGrid } from '../../api/queries'
 import type { GridResponse, Product, StoredCoverage } from '../../api/types'
@@ -20,6 +20,7 @@ import { StatusMessage } from '../../components/StatusMessage'
 import { describeError } from '../../lib/errors'
 import { formatCoordinates } from '../../lib/format'
 import { useResolvedTheme } from '../../lib/theme'
+import { pointDetailPath } from '../point-detail/paths'
 import { PointPanel } from '../point-panel/PointPanel'
 import { buildColourScale } from './colourScale'
 import { CoordinateSearch } from './CoordinateSearch'
@@ -461,6 +462,14 @@ function Explorer({ product, stored }: { product: Product; stored: StoredCoverag
               inComputedArea={isInBBox(selected.lat, selected.lon, product.computed?.bbox)}
               onClose={clearSelection}
               onSelectYear={setYear}
+              actions={
+                <Link
+                  to={pointDetailPath(selected.lat, selected.lon, year)}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-ink hover:bg-accent-hover"
+                >
+                  Open point details <span aria-hidden="true">→</span>
+                </Link>
+              }
             />
           </div>
         ) : (

@@ -11,7 +11,7 @@ import type {
   Timeseries,
   YearMetric,
 } from '../api/types'
-import { dateFromDayOfYear } from '../lib/dates'
+import { dateFromDayOfYear, dayOfYear } from '../lib/dates'
 
 export const PRODUCT = 'ndvi_synth'
 export const YEARS = [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
@@ -74,11 +74,14 @@ export function timeseriesFor(lat: number, lon: number, startYear: number, endYe
 const DOYS = Array.from({ length: 23 }, (_, i) => 1 + 16 * i)
 
 export function ndviCurveFor(lat: number, lon: number, year: number, thresholdFrac = 0.5): NdviCurve {
+  // Timed by the stored season, widened by half a composite, as the real generator does, so the
+  // computed dates land within one composite of the stored ones.
   const season = seasonAt(lat, lon, year)
-  const sos = Number(season.sos_date.slice(5, 7)) * 30
+  const sos = dayOfYear(season.sos_date) - 8
+  const eos = dayOfYear(season.eos_date) + 8
   const ndvi = DOYS.map((doy) => {
     const up = 1 / (1 + Math.exp(-(doy - sos) / 9))
-    const down = 1 / (1 + Math.exp(-(doy - 290) / 12))
+    const down = 1 / (1 + Math.exp(-(doy - eos) / 12))
     return Math.round((0.18 + 0.55 * (up - down)) * 1e6) / 1e6
   })
   const min = Math.min(...ndvi)
