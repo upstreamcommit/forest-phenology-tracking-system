@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-e2e
+coverage
+test-results
+playwright-report
+blob-report
+*.log
+.DS_Store
+# Local env files (gitignored) would change what the image builds, e.g. VITE_BASEMAP.
+.env*
+*.local

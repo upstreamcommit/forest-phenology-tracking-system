@@ -26,6 +26,17 @@ The dev server proxies the API paths (`/catalog`, `/phenology`, `/health`, `/doc
 --build` from the repository root). Point it elsewhere with `FPTS_API_URL=http://host:port npm run dev`.
 The app calls the API on its own origin, so the API needs no CORS.
 
+In docker compose the app is built into an nginx image (`Dockerfile`, `nginx.conf`) that serves
+it on port 8080 and forwards the same API paths to the `api` service: `docker compose --profile
+web up --build` from the repository root. nginx sends a strict Content-Security-Policy (only
+this origin plus OpenFreeMap's tiles; no inline scripts, which is why the theme is set by
+`public/theme-init.js`), long-term caching for the fingerprinted `/assets`, and `no-cache` for
+everything else; any unknown path gets the app, so links such as `/point/51.5/-0.5` work on
+reload. The security headers are in `security-headers.conf`, which nginx includes and
+`vite.config.ts` reads into `preview.headers`, so `vite preview` and the end-to-end tests send
+the same ones (the dev server does not: its React refresh preamble is an inline script). The
+repository's `compose_smoke_test.sh` checks them, and the caching, on the running image.
+
 | Task | Command |
 |---|---|
 | Unit and component tests | `npm test` (`npm run test:watch` while developing) |
@@ -34,10 +45,11 @@ The app calls the API on its own origin, so the API needs no CORS.
 | Type-check and build | `npm run build` |
 
 The end-to-end tests build the app with `VITE_BASEMAP=none` (no map tiles) into `dist-e2e/`, so
-they never replace a real build in `dist/`, serve it on port 4174 (not `vite preview`'s 4173) and
-mock the API with the fixtures in `src/test/fixtures.ts` (through `e2e/mockApi.ts`), so they need
-neither the backend nor the network. Unit tests run in the `America/Los_Angeles` time zone and the
-end-to-end browser does too, so a date that slips a day west of Greenwich fails them.
+they never replace a real build in `dist/`, serve it on port 4174 (not `vite preview`'s 4173)
+under the production security headers, and mock the API with the fixtures in
+`src/test/fixtures.ts` (through `e2e/mockApi.ts`), so they need neither the backend nor the
+network. Unit tests run in the `America/Los_Angeles` time zone and the end-to-end browser does
+too, so a date that slips a day west of Greenwich fails them.
 
 ## Layout
 
@@ -48,8 +60,9 @@ end-to-end browser does too, so a date that slips a day west of Greenwich fails 
 - `src/app/`: app, router, shell (header, API status, theme, synthetic-data banner), error and
   404 pages.
 - `src/components/`: small shared UI primitives.
-- `src/features/`: `map/` (map explorer), `point-panel/` (selected point), `charts/`
-  (hand-built SVG charts), `about/` (data and methods).
+- `src/features/`: `map/` (map explorer), `point-panel/` (selected point on the map),
+  `point-detail/` (a point's page: stored season, NDVI curve and threshold), `charts/`
+  (hand-built SVG charts: season trend, NDVI curve), `about/` (data and methods).
 - `src/lib/`: dates (UTC-safe), formatting, theme, error wording, and `useDraft` (a controlled
   value that follows its prop but shows edits at once, for inputs driven by the URL).
 - `src/styles/index.css`: design tokens. Components use token classes such as `bg-surface` or

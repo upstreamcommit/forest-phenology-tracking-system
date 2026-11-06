@@ -68,6 +68,12 @@ for (const theme of ['light', 'dark'] as const) {
       })
     }
 
+    test('point detail page has no serious accessibility violations', async ({ page }) => {
+      await page.goto('/point/51.5/-0.5?year=2021')
+      await expect(page.getByText('Computed season: 7 Apr 2021 to 16 Oct 2021, 192 days.')).toBeVisible()
+      await expectNoSeriousViolations(page)
+    })
+
     test('data and methods page has no serious accessibility violations', async ({ page }) => {
       await page.goto('/about')
       await expect(page.getByText(/0\.01° pixels/)).toBeVisible()

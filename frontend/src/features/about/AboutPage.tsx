@@ -133,7 +133,8 @@ export function AboutPage() {
           The map shows <strong className="text-ink">stored</strong> metrics, precomputed for every
           grid point. Inside the outlined area the raw NDVI stack is also available, so a point
           there can show its NDVI curve alongside the stored values. The two come from the same
-          model and agree to within about one composite.
+          model, and at the default threshold, which the stored metrics use, they agree to within
+          about one composite. Other thresholds move the computed dates further.
         </p>
       </Section>
 

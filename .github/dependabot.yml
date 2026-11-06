@@ -49,6 +49,16 @@ updates:
       - dependency-name: "postgis/postgis"
         update-types: ["version-update:semver-major"]
 
+  # The frontend image (frontend/Dockerfile): Node for the build, nginx to serve it.
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "monthly"
+    ignore:
+      # Node majors move together with CI's node-version and the engines range in package.json.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+
   # Images the compose files pull directly (today only redis:7-alpine, a major-only tag, so this
   # proposes redis majors); the "docker" entry above only reads Dockerfiles.
   - package-ecosystem: "docker-compose"
